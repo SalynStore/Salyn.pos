@@ -35,7 +35,7 @@ nav button.on{color:var(--rose);font-weight:700;box-shadow:inset 0 3px 0 var(--r
 .lot{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:6px 0;border-top:1px dashed var(--line);font-size:14px;color:var(--mut)}
 .code{font-family:ui-monospace,Menlo,monospace;background:#f3e6ea;color:var(--pl);padding:1px 6px;border-radius:6px;font-size:13px}
 </style></head><body>
-<header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span></header>
+<header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span><span id="stt" style="float:right;font-size:13px;color:#e9c9d6"></span></header>
 <main id="v"></main>
 <nav id="nav"></nav>
 <div id="m"></div><div id="t"></div>
@@ -65,9 +65,73 @@ function migrate(){
   if(!p.code)p.code=nextCode();
   if(p.cat&&!D.cats.includes(p.cat))D.cats.push(p.cat);
  })}
-try{const r=localStorage.getItem('salynpos');if(r)D=JSON.parse(r)}catch(e){}
 migrate();
-function save(){try{localStorage.setItem('salynpos',JSON.stringify(D))}catch(e){toast('No se pudo guardar en este celular')}}
+/* ---------- Nube (Firebase): entrar, guardar y sincronizar ---------- */
+let user=null,ready=false,synced={},unsubs=[];
+const COLS=['products','moves','sales','payments'];
+const canon=o=>JSON.stringify(o,(k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.keys(v).sort().reduce((a,x)=>(a[x]=v[x],a),{}):v);
+const blank=()=>({products:[],moves:[],cats:CATS.slice(),reasons:REASONS.slice(),payments:[],sales:[]});
+function save(){
+ if(!ready)return;const ops=[];
+ COLS.forEach(c=>{const seen={};
+  D[c].forEach(x=>{const k=c+'/'+x.id,j=canon(x);seen[k]=1;if(synced[k]!==j){synced[k]=j;ops.push({col:c,id:x.id,data:JSON.parse(j)})}});
+  Object.keys(synced).forEach(k=>{if(k.startsWith(c+'/')&&!seen[k]){delete synced[k];ops.push({col:c,id:k.slice(c.length+1),del:true})}})});
+ const m=canon({cats:D.cats,reasons:D.reasons});
+ if(synced['config/main']!==m){synced['config/main']=m;ops.push({col:'config',id:'main',data:{cats:D.cats,reasons:D.reasons}})}
+ if(ops.length)FB.write(ops).catch(e=>toast('No se pudo sincronizar: '+(e.code||e.message)))}
+function normalize(){COLS.forEach(c=>D[c].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0))}
+function onSnap(col,snap){let ch=false;
+ snap.docChanges().forEach(c=>{const id=c.doc.id,k=col+'/'+id;
+  if(col==='config'){if(c.type!=='removed'){const d=c.doc.data();D.cats=d.cats||D.cats;D.reasons=d.reasons||D.reasons;synced[k]=canon({cats:D.cats,reasons:D.reasons});ch=true}return}
+  if(c.type==='removed'){D[col]=D[col].filter(x=>x.id!==id);delete synced[k];ch=true}
+  else{const d=c.doc.data();d.id=id;const i=D[col].findIndex(x=>x.id===id);if(i>=0)D[col][i]=d;else D[col].push(d);synced[k]=canon(d);ch=true}});
+ if(ch){normalize();if(ready)softRender()}}
+function softRender(){const a=document.activeElement;
+ if($('#m').className==='on'||(a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName||'')))return;render()}
+function updStatus(){const e=$('#stt');if(!ready){e.textContent='';return}
+ e.textContent=navigator.onLine?'● En línea':'● Sin internet (se guarda y sube al volver)'}
+function showLogin(msg){$('#nav').style.display='none';$('#stt').textContent='';
+ $('#v').innerHTML=`<h2>Entrar</h2><div class="card"><form onsubmit="return doLogin(event)">
+ <label>Correo<input name="e" type="email" required autocomplete="username" value="salyn0store@gmail.com"></label>
+ <label>Contraseña<input name="p" type="password" required autocomplete="current-password"></label>
+ <button class="btn">Entrar</button></form>${msg?`<p style="color:var(--bad)">${esc(msg)}</p>`:''}</div>`}
+const authMsg=e=>({'auth/invalid-credential':'Correo o contraseña incorrectos.','auth/wrong-password':'Correo o contraseña incorrectos.','auth/user-not-found':'Correo o contraseña incorrectos.','auth/too-many-requests':'Demasiados intentos. Espera unos minutos.','auth/network-request-failed':'Sin internet. Revisa tu conexión.'})[e.code]||'No se pudo entrar: '+(e.code||e.message);
+async function doLogin(e){e.preventDefault();const f=new FormData(e.target);
+ try{await FB.login(f.get('e').trim(),f.get('p'))}catch(err){showLogin(authMsg(err))}return false}
+function stopSync(){unsubs.forEach(f=>f());unsubs=[];ready=false;synced={};D=blank();cart=[];pd={}}
+async function startSync(){
+ $('#v').innerHTML='<div class="empty">Cargando tus datos…</div>';
+ stopSync();
+ const firsts=[...COLS,'config'].map(col=>new Promise(res=>{let done=false;
+  unsubs.push(FB.listen(col,snap=>{onSnap(col,snap);if(!done&&(!snap.metadata.fromCache||!navigator.onLine||snap.size>0)){done=true;res()}},
+   err=>{res();toast('No se pudo leer '+col+': '+(err.code||''))}))}));
+ await Promise.race([Promise.all(firsts),new Promise(r=>setTimeout(r,8000))]);
+ normalize();
+ if(!synced['config/main'])synced['config/main']=canon({cats:D.cats,reasons:D.reasons});
+ ready=true;$('#nav').style.display='flex';updStatus();
+ const loc=localStorage.getItem('salynpos');
+ if(loc&&!D.products.length&&!D.moves.length){try{const d=JSON.parse(loc);if(d.products&&d.products.length)offerImport(d)}catch(e){}}
+ migrate();save();render()}
+function offerImport(d){
+ modal(`<h2>Encontré datos en este aparato</h2><p>Hay ${d.products.length} producto(s) y ${(d.moves||[]).length} movimiento(s) guardados solo aquí. ¿Los subo a la nube para verlos en todos tus aparatos?</p>
+ <button class="btn" onclick="doImport()">Sí, subirlos</button><button class="btn ghost" onclick="closeM()">No, empezar vacío</button>`);window._imp=d}
+function doImport(){D=window._imp;migrate();save();try{localStorage.setItem('salynpos_subido',localStorage.getItem('salynpos'));localStorage.removeItem('salynpos')}catch(e){}
+ closeM();render();toast('Datos subidos a la nube')}
+function boot(){FB.onAuth(u=>{if(u){user=u;startSync()}else{stopSync();showLogin()}})}
+/* ---------- Exportar a Excel ---------- */
+function loadXlsx(){return new Promise((res,rej)=>{if(window.XLSX)return res();const t=document.createElement('script');
+ t.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';t.onload=res;t.onerror=()=>rej(new Error('x'));document.head.appendChild(t)})}
+async function exportXlsx(){
+ try{await loadXlsx()}catch(e){toast('No se pudo cargar el exportador. Revisa tu internet.');return}
+ const W=XLSX.utils.book_new(),add=(n,r)=>XLSX.utils.book_append_sheet(W,XLSX.utils.json_to_sheet(r.length?r:[{'(sin datos)':''}]),n);
+ add('Productos',D.products.map(p=>({'Código':p.code,Producto:p.name,'Categoría':p.cat,'Presentación':p.unit,Costo:p.cost,'Precio venta':p.price,Stock:stock(p),'Avisar si quedan ≤':p.min})));
+ add('Lotes',D.products.flatMap(p=>p.lots.map(l=>({'Código':p.code,Producto:p.name,Cantidad:l.qty,'Costo por unidad':l.cost,'Fecha entrega':l.date,Vencimiento:l.exp}))));
+ add('Ventas',D.sales.map(z=>({Fecha:z.date,Cliente:z.client,'Forma de pago':z.method||'Sin dato',Productos:sLines(z.id).map(x=>x.name+' ×'+x.qty).join(', '),Total:saleTotal(z.id),'Pagó al vender':z.paid,'A crédito':z.credit?'Sí':'No'})));
+ add('Detalle ventas',D.moves.filter(x=>x.type==='out').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Precio:x.price,Costo:x.cost,Ganancia:x.qty*(x.price-x.cost)})));
+ add('Pagos de deudas',D.payments.map(a=>{const z=S(a.mid);return{Fecha:a.date,Cliente:z?z.client:'',Monto:a.amount,'Forma de pago':a.method}}));
+ add('Entradas',D.moves.filter(x=>x.type==='in').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost})));
+ add('Mermas',D.moves.filter(x=>x.type==='merma').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost,'Pérdida':x.qty*x.cost,Motivo:x.reason||'Vencido',Nota:x.note||''})));
+ XLSX.writeFile(W,'salyn-pos-'+today()+'.xlsx')}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'S/ '+(+n||0).toFixed(2);
 const today=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
@@ -288,7 +352,7 @@ function doPay(e,id){e.preventDefault();const f=new FormData(e.target),d=debts()
 /* ---------- Mermas ---------- */
 function autoMerma(){let n=0;
  D.products.forEach(p=>{const dead=p.lots.filter(l=>l.qty>0&&l.exp&&l.exp<today());
-  dead.forEach(l=>{D.moves.push(Object.assign(mv('merma',p,l.qty,l.cost,0),{date:l.exp,reason:'Vencido',auto:1,lotDate:l.date,exp:l.exp}));n++});
+  dead.forEach(l=>{const mid='am_'+l.id+'_'+l.qty;if(!D.moves.some(x=>x.id===mid)){D.moves.push(Object.assign(mv('merma',p,l.qty,l.cost,0),{id:mid,date:l.exp,reason:'Vencido',auto:1,lotDate:l.date,exp:l.exp}))}n++});
   if(dead.length)p.lots=p.lots.filter(l=>!dead.includes(l))});
  if(n)save();return n}
 const reasonOpts=cur=>D.reasons.map(r=>`<option ${r===cur?'selected':''}>${esc(r)}</option>`).join('')+'<option value="__new">➕ Crear motivo nuevo…</option>';
@@ -366,13 +430,16 @@ function vSum(){
  <b>${x.type==='out'?money(x.qty*x.price):money(x.qty*x.cost)}</b></div>`).join(''):'<div class="empty">Todavía no hay movimientos.</div>')+
  `<h3>Respaldo</h3><button class="btn ghost" onclick="backup()">Descargar respaldo</button>
  <label class="btn ghost" style="text-align:center;margin-top:8px;color:var(--pl)">Restaurar respaldo<input type="file" accept=".json" style="display:none" onchange="restore(this)"></label>
- <p class="mut">Descarga un respaldo cada semana. Si cambias de celular o borras los datos del navegador, lo restauras aquí.</p>`}
+ <button class="btn ghost" style="margin-top:8px" onclick="exportXlsx()">Exportar todo a Excel</button>
+ <p class="mut">Tus datos ya se guardan en la nube y se ven en todos tus aparatos. El respaldo es un seguro extra: descarga uno de vez en cuando.</p>
+ <button class="btn ghost" style="margin-top:6px" onclick="FB.logout()">Cerrar sesión</button>`}
 function backup(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(D)],{type:'application/json'}));a.download='salyn-pos-respaldo-'+today()+'.json';a.click()}
 function restore(el){const f=el.files[0];if(!f)return;const r=new FileReader();
  r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.products||!d.moves)throw 0;if(confirm('Esto reemplaza los datos actuales. ¿Continuar?')){D=d;migrate();save();render();toast('Respaldo restaurado')}}catch(e){toast('Ese archivo no es un respaldo válido')}};r.readAsText(f)}
 
 /* ---------- Pantalla ---------- */
 function render(keepFocus){
+ if(!ready)return;
  const nm=autoMerma();if(nm)toast(nm+(nm==1?' lote vencido pasó':' lotes vencidos pasaron')+' a Mermas');
  const a=alerts(),n=a.v.length+a.s.length,nd=debts().length;
  const T=[['productos','Productos'],['vender','Vender'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
@@ -380,5 +447,35 @@ function render(keepFocus){
  $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum}[tab]();
  if(keepFocus){const s=$('#s');if(s){s.focus();s.setSelectionRange(q.length,q.length)}}
 }
-render();
+window.addEventListener('fbready',boot);
+window.addEventListener('fberror',()=>{$('#v').innerHTML='<div class="empty">No se pudo conectar con Firebase. Revisa tu internet.<br><br><button class="btn" onclick="location.reload()">Reintentar</button></div>'});
+window.addEventListener('online',updStatus);window.addEventListener('offline',updStatus);
+$('#nav').style.display='none';
+$('#v').innerHTML='<div class="empty">Conectando…</div>';
+if(window.FB)boot();
+</script>
+<script type="module">
+const B='https://www.gstatic.com/firebasejs/10.14.1/';
+try{
+ const [A,Au,Fs]=await Promise.all([import(B+'firebase-app.js'),import(B+'firebase-auth.js'),import(B+'firebase-firestore.js')]);
+ const app=A.initializeApp({
+  apiKey:"AIzaSyB376TG_n1ldzPf0j-9PMLu2nitp4x1-cM",
+  authDomain:"salyn-pos.firebaseapp.com",
+  projectId:"salyn-pos",
+  storageBucket:"salyn-pos.firebasestorage.app",
+  messagingSenderId:"349247318017",
+  appId:"1:349247318017:web:ca432cb281bb32162d3800"});
+ const auth=Au.getAuth(app);
+ let db;
+ try{db=Fs.initializeFirestore(app,{localCache:Fs.persistentLocalCache({tabManager:Fs.persistentMultipleTabManager()})})}catch(e){db=Fs.getFirestore(app)}
+ window.FB={
+  login:(e,p)=>Au.signInWithEmailAndPassword(auth,e,p),
+  logout:()=>Au.signOut(auth),
+  onAuth:cb=>Au.onAuthStateChanged(auth,cb),
+  listen:(col,cb,er)=>Fs.onSnapshot(Fs.collection(db,col),cb,er),
+  write:async ops=>{for(let i=0;i<ops.length;i+=400){const b=Fs.writeBatch(db);
+   ops.slice(i,i+400).forEach(o=>{const r=Fs.doc(db,o.col,o.id);o.del?b.delete(r):b.set(r,o.data)});await b.commit()}}};
+ window.dispatchEvent(new Event('fbready'));
+}catch(e){console.error(e);window.dispatchEvent(new Event('fberror'))}
 </script></body></html>
+
