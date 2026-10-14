@@ -37,8 +37,12 @@ nav button.on{color:var(--rose);font-weight:700;box-shadow:inset 0 3px 0 var(--r
 .empty{text-align:center;color:var(--mut);padding:24px 8px}
 .lot{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:6px 0;border-top:1px dashed var(--line);font-size:14px;color:var(--mut)}
 .code{font-family:ui-monospace,Menlo,monospace;background:#f3e6ea;color:var(--pl);padding:1px 6px;border-radius:6px;font-size:13px}
+.pickbox{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff;margin:0 0 10px}
+.pk{padding:10px;border-bottom:1px solid var(--line)}
+.pk:last-child{border-bottom:0}
+.pk.sel{background:#f9e3ea;box-shadow:inset 4px 0 0 var(--rose)}
 </style></head><body>
-<header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span><span id="stt" style="float:right;font-size:13px;color:#e9c9d6"></span></header>
+<header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span><span id="stt" onclick="retrySave()" style="float:right;font-size:13px;color:#e9c9d6;cursor:pointer"></span></header>
 <main id="v"></main>
 <nav id="nav"></nav>
 <div id="m"></div><div id="t"></div>
@@ -70,7 +74,7 @@ function migrate(){
  })}
 migrate();
 /* ---------- Nube (Firebase): entrar, guardar y sincronizar ---------- */
-let user=null,ready=false,synced={},unsubs=[];
+let user=null,ready=false,synced={},unsubs=[],syncErr='';
 const COLS=['products','moves','sales','payments'];
 const canon=o=>JSON.stringify(o,(k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.keys(v).sort().reduce((a,x)=>(a[x]=v[x],a),{}):v);
 const blank=()=>({products:[],moves:[],cats:CATS.slice(),reasons:REASONS.slice(),payments:[],sales:[]});
@@ -81,7 +85,8 @@ function save(){
   Object.keys(synced).forEach(k=>{if(k.startsWith(c+'/')&&!seen[k]){delete synced[k];ops.push({col:c,id:k.slice(c.length+1),del:true})}})});
  const m=canon({cats:D.cats,reasons:D.reasons});
  if(synced['config/main']!==m){synced['config/main']=m;ops.push({col:'config',id:'main',data:{cats:D.cats,reasons:D.reasons}})}
- if(ops.length)FB.write(ops).catch(e=>toast('No se pudo sincronizar: '+(e.code||e.message)))}
+ if(ops.length)FB.write(ops).then(()=>{if(syncErr){syncErr='';updStatus()}}).catch(e=>{syncErr=e.code||e.message||'error';ops.forEach(o=>{delete synced[o.col+'/'+o.id]});updStatus();toast('⚠ No se guardó en la nube: '+syncErr,6000)})}
+function retrySave(){if(!ready)return;syncErr='';save();updStatus();toast('Reintentando guardar…')}
 function normalize(){COLS.forEach(c=>D[c].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0))}
 function onSnap(col,snap){let ch=false;
  snap.docChanges().forEach(c=>{const id=c.doc.id,k=col+'/'+id;
@@ -92,7 +97,7 @@ function onSnap(col,snap){let ch=false;
 function softRender(){const a=document.activeElement;
  if($('#m').className==='on'||(a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName||'')))return;render()}
 function updStatus(){const e=$('#stt');if(!ready){e.textContent='';return}
- e.textContent=navigator.onLine?'● En línea':'● Sin internet (se guarda y sube al volver)'}
+ e.textContent=syncErr?'⚠ No se guardó · toca para reintentar':(navigator.onLine?'● En línea':'● Sin internet (se guarda y sube al volver)')}
 function showLogin(msg){$('#nav').style.display='none';$('#stt').textContent='';
  $('#v').innerHTML=`<h2>Entrar</h2><div class="card"><form onsubmit="return doLogin(event)">
  <label>Correo<input name="e" type="email" required autocomplete="username" value="salyn0store@gmail.com"></label>
@@ -139,7 +144,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const money=n=>'S/ '+(+n||0).toFixed(2);
 const today=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
 range=today().slice(0,7);
-let cart=[],pd={};
+let cart=[],pd={},vsq='',vsel='';
 const fd=d=>d?d.split('-').reverse().join('/'):'';
 const days=e=>Math.round((new Date(e+'T00:00')-new Date(today()+'T00:00'))/864e5);
 const P=id=>D.products.find(x=>x.id===id);
@@ -150,7 +155,7 @@ const sellable=p=>p.lots.filter(l=>!l.exp||l.exp>=today()).reduce((s,l)=>s+l.qty
 function ls(l){if(!l.exp)return'ok';const d=days(l.exp);return d<0?'vencido':d<=30?'pronto':'ok'}
 function st(p){const s=p.lots.map(ls);return s.includes('vencido')?'vencido':s.includes('pronto')?'pronto':'ok'}
 function nextExp(p){const l=p.lots.filter(l=>l.exp).sort(ord)[0];return l?l.exp:''}
-function toast(s){const t=$('#t');t.textContent=s;t.style.display='block';setTimeout(()=>t.style.display='none',2600)}
+function toast(s,ms){const t=$('#t');t.textContent=s;t.style.display='block';clearTimeout(window._tt);window._tt=setTimeout(()=>t.style.display='none',ms||2600)}
 function modal(h){$('#m').innerHTML='<div class="sheet">'+h+'</div>';$('#m').className='on'}
 function closeM(){$('#m').className=''}
 function go(t){tab=t;render()}
@@ -254,13 +259,14 @@ function savePd(form){const f=new FormData(form);pd={d:f.get('d'),m:f.get('m'),c
 function saleCard(z){return `<div class="card" onclick="saleForm('${z.id}')"><div class="row"><div><b>${fd(z.date)}${z.client?' · '+esc(z.client):''}</b><div class="mut">${lineTxt(z.id)}</div></div>
  <div style="text-align:right"><b>${money(saleTotal(z.id))}</b><div class="mut">${z.method||'Sin dato'}${z.credit?' · fiado':''}</div></div></div></div>`}
 function vSell(){
-  const l=D.products.filter(p=>sellable(p)-cartQty(p.id)>0),p=l[0];
+  const all=D.products.filter(p=>sellable(p)-cartQty(p.id)>0),l=pickList(),p=l.find(x=>x.id===vsel)||l[0],pu=p?p.unit:'unidad',pr=p?p.price:'';vsel=p?p.id:'';
   const rec=D.sales.slice().sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:a.id<b.id?1:-1).slice(0,15);
-  const add=l.length?`<div class="card"><form onsubmit="return addCart(event)"><b>Agregar producto</b>
-  <label style="margin-top:8px">Producto<select name="p" onchange="fillSell(this.value)">${opts(l,x=>sellable(x)-cartQty(x.id))}</select></label>
-  <div class="r2"><label>Cantidad (<span id="su">${UN[p.unit][1]}</span>)<input name="q" id="sq" type="number" min="1" value="1" required oninput="sub()"></label>
-  <label>Precio (S/) por <span id="su2">${p.unit}</span><input name="c" id="sp" type="number" step="0.01" min="0" required value="${p.price}" oninput="sub()"></label></div>
-  <div class="mut" style="margin-bottom:6px">Subtotal: <b id="sb">${money(p.price)}</b></div>
+  const add=all.length?`<div class="card"><form onsubmit="return addCart(event)"><b>Agregar producto</b>
+  <input id="vs" placeholder="Buscar producto por nombre o código" value="${esc(vsq)}" oninput="vsq=this.value;renderPick()" autocomplete="off" style="margin:8px 0">
+  <div class="pickbox" id="pk">${pickHTML(l)}</div><input type="hidden" name="p" id="pp" value="${vsel}">
+  <div class="r2"><label>Cantidad (<span id="su">${UN[pu][1]}</span>)<input name="q" id="sq" type="number" min="1" value="1" required oninput="sub()"></label>
+  <label>Precio (S/) por <span id="su2">${pu}</span><input name="c" id="sp" type="number" step="0.01" min="0" required value="${pr}" oninput="sub()"></label></div>
+  <div class="mut" style="margin-bottom:6px">Subtotal: <b id="sb">${money(pr||0)}</b></div>
   <button class="btn ghost">+ Agregar a la venta</button></form></div>`
   :`<div class="empty">${cart.length?'Ya agregaste todo el stock disponible.':'No tienes productos disponibles para vender. Registra una entrada o revisa Alertas.'}</div>`;
   const cartH=cart.length?`<div class="card"><b>Venta actual</b>`+cart.map((c,i)=>{const q=P(c.pid);
@@ -275,15 +281,23 @@ function vSell(){
   <button class="btn">Registrar venta</button><button type="button" class="btn ghost" onclick="cart=[];pd={};render()">Vaciar venta</button></form></div>`:'';
   return `<h2>Vender</h2>`+add+cartH+`<p class="mut">Se vende primero el lote que vence antes. Los lotes vencidos no se pueden vender.</p>`+
    (rec.length?`<h3>Ventas recientes (toca una para corregirla o anularla)</h3>`+rec.map(saleCard).join(''):'')}
+function pickList(){const q=vsq.toLowerCase();
+ return D.products.filter(p=>sellable(p)-cartQty(p.id)>0&&(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q)))}
+function pickHTML(l){return l.length?l.map(p=>`<div class="pk ${p.id===vsel?'sel':''}" onclick="pickP('${p.id}')"><div class="row"><b>${esc(p.name)}</b><span class="code">${esc(p.code)}</span></div><div class="mut">${un(sellable(p)-cartQty(p.id),p.unit)} disponibles · ${money(p.price)}</div></div>`).join(''):'<div class="empty" style="padding:12px">No encontré ese producto.</div>'}
+function renderPick(force){const l=pickList(),changed=!l.some(p=>p.id===vsel);
+ if(changed)vsel=l.length?l[0].id:'';
+ $('#pk').innerHTML=pickHTML(l);$('#pp').value=vsel;
+ if(vsel&&(changed||force))fillSell(vsel)}
+function pickP(id){vsel=id;renderPick(true)}
 function fillSell(id){const p=P(id);$('#sp').value=p.price;$('#su').textContent=UN[p.unit][1];$('#su2').textContent=p.unit;sub()}
 function sub(){$('#sb').textContent=money($('#sq').value*$('#sp').value)}
 function tot(){const t=cartTotal(),cr=$('#cr').checked,pg=+$('#pg').value||0;
  $('#crb').style.display=cr?'block':'none';$('#tt').textContent=money(t);
  $('#dd').textContent=cr?'Pagó '+money(Math.min(pg,t))+' · Debe '+money(Math.max(t-pg,0)):''}
 function addCart(e){e.preventDefault();const f=new FormData(e.target),p=P(f.get('p')),n=+f.get('q'),c=+f.get('c');
- if(!p||!n)return false;const av=sellable(p)-cartQty(p.id);
+ if(!p){toast('Toca un producto de la lista para elegirlo');return false}if(!n)return false;const av=sellable(p)-cartQty(p.id);
  if(n>av){toast('Solo puedes agregar '+un(av,p.unit)+' de '+p.name+' (los vencidos no cuentan)');return false}
- cart.push({pid:p.id,qty:n,price:c});render();return false}
+ cart.push({pid:p.id,qty:n,price:c});vsq='';vsel='';render();return false}
 function rmCart(i){cart.splice(i,1);render()}
 function doSell(e){e.preventDefault();const f=new FormData(e.target);
  const cr=f.get('cr')==='on',cl=(f.get('cl')||'').trim(),dt=f.get('d')||today();
@@ -298,7 +312,8 @@ function doSell(e){e.preventDefault();const f=new FormData(e.target);
   D.moves.push(Object.assign(mv('out',p,c.qty,cost/c.qty,c.price),{date:dt,sid,lots:used}))});
  const paid=cr?Math.min(Math.max(+f.get('pg')||0,0),total):total,debe=total-paid;
  D.sales.push({id:sid,date:dt,method:f.get('m'),paid,credit:cr&&debe>0.005,client:cl});
- cart=[];pd={};save();toast(debe>0.005?'Venta a crédito: debe '+money(debe):'Venta registrada: '+money(total));render();return false}
+ const rest=[...new Set(cart.map(c=>c.pid))].map(id=>{const q=P(id);return q?q.name+': quedan '+un(stock(q),q.unit):''}).filter(Boolean).join(' · ');
+ cart=[];pd={};vsq='';vsel='';save();toast((debe>0.005?'Venta a crédito: debe '+money(debe):'Venta registrada: '+money(total))+' — Inventario descontado ('+rest+')',6000);render();return false}
 function saleForm(id){const z=S(id);if(!z)return;const ab=D.payments.filter(a=>a.mid===id);
  modal(`<h2>Venta del ${fd(z.date)}</h2>`+sLines(id).map(x=>`<div class="lot"><span>${esc(x.name)} · ${un(x.qty,x.unit||'unidad')} × ${money(x.price)}</span><b>${money(x.qty*x.price)}</b></div>`).join('')+
  `<div class="row" style="margin:8px 0"><b>Total</b><b>${money(saleTotal(id))}</b></div>
@@ -416,6 +431,9 @@ function vSum(){
  D.sales.filter(inRange).forEach(z=>{const k=z.method||'Sin dato';pay[k]=(pay[k]||0)+z.paid});
  D.payments.filter(a=>range==='todo'?a.date>='2025-09-01':a.date.slice(0,7)===range).forEach(a=>{pay[a.method]=(pay[a.method]||0)+a.amount});
  const cobrado=Object.values(pay).reduce((s,v)=>s+v,0),porCobrar=debts().reduce((s,d)=>s+d.debe,0);
+ const cmp=D.moves.filter(x=>x.type==='in'&&x.date>='2025-09-01').reduce((t,x)=>t+x.qty*x.cost,0);
+ const cobT=D.sales.filter(z=>z.date>='2025-09-01').reduce((t,z)=>t+z.paid,0)+D.payments.filter(a=>a.date>='2025-09-01').reduce((t,a)=>t+a.amount,0);
+ const bal=Math.round((cobT-cmp)*100)/100,pct=cmp>0?cobT/cmp*100:0;
  const inv=D.products.reduce((s,p)=>s+p.lots.reduce((a,x)=>a+x.qty*x.cost,0),0),val=D.products.reduce((s,p)=>s+stock(p)*p.price,0);
  const lab={in:'Entrada',out:'Venta',merma:'Merma'};
  return `<h2>Resumen</h2>
@@ -427,6 +445,15 @@ function vSum(){
  <div class="card"><div class="mut">Pérdida por mermas</div><div class="big" style="color:var(--bad)">${money(loss)}</div></div></div>
  <div class="card"><div class="mut">Cobrado en este período</div><div class="big">${money(cobrado)}</div>${Object.entries(pay).filter(([k,v])=>k!=='Sin dato'||v>0).map(([k,v])=>`<div class="row mut"><span>${k}</span><b>${money(v)}</b></div>`).join('')}</div>
  <div class="card"><div class="mut">Por cobrar (fiados pendientes, a hoy)</div><div class="big" style="color:var(--warn)">${money(porCobrar)}</div></div>
+ <div class="card"><b>¿Ya recuperé mi inversión?</b><div class="mut">Todo, desde el 01/09/2025 (no depende del mes elegido)</div>
+ <div class="big" style="color:${bal>=0?'var(--ok)':'var(--bad)'};margin-top:6px">${cmp===0?'Aún sin compras':bal>=0?'Sí ✅':'Todavía no'}</div>
+ <div style="background:#f1e4e8;border-radius:99px;height:10px;margin:8px 0;overflow:hidden"><div style="width:${Math.min(pct,100)}%;height:100%;background:${bal>=0?'var(--ok)':'var(--rose)'}"></div></div>
+ <div class="mut">${Math.round(pct)}% recuperado</div>
+ <div class="row mut" style="margin-top:6px"><span>Compras (lo que invertiste)</span><b>${money(cmp)}</b></div>
+ <div class="row mut"><span>Cobrado (lo que ya entró)</span><b>${money(cobT)}</b></div>
+ <div class="row" style="margin-top:4px"><b>${bal>=0?'Ya te sobra en caja':'Te falta recuperar'}</b><b>${money(Math.abs(bal))}</b></div>
+ <div class="row mut"><span>Aún tienes en stock (a costo)</span><b>${money(inv)}</b></div>
+ <p class="mut" style="margin-bottom:0">${cmp===0?'Registra tus compras (entradas) para ver este avance.':bal>=0?'Ya cobraste más de lo que compraste. Lo que tienes en stock es ganancia por delante.':(bal+porCobrar+val>=0?'Si vendes todo tu stock a precio de venta ('+money(val)+') y cobras lo que te deben ('+money(porCobrar)+'), sí recuperarías tu inversión.':'Aun vendiendo todo tu stock y cobrando lo que te deben, todavía te faltarían '+money(-(bal+porCobrar+val))+'.')}</p></div>
  <div class="card"><div class="mut">Hoy tienes en stock</div><b>${money(inv)}</b> invertidos · valen <b>${money(val)}</b> a precio de venta</div>
  <h3>Últimos movimientos</h3>`+
  (l.length?l.slice().reverse().slice(0,20).map(x=>`<div class="card row"><div><b>${esc(x.name)}</b><div class="mut">${lab[x.type]}${x.reason?' ('+esc(x.reason)+')':''}${x.type==='out'&&S(x.sid)?' ('+(S(x.sid).method||'Sin dato')+(S(x.sid).credit?', crédito':'')+')':''} · ${un(x.qty,x.unit||'unidad')} · ${fd(x.date)}</div></div>
