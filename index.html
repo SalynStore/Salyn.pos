@@ -367,6 +367,27 @@ function doPay(e,id){e.preventDefault();const f=new FormData(e.target),d=debts()
  if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
  D.payments.push({id:uid(),mid:id,date:dt,amount:a,method:f.get('m')});save();closeM();render();toast('Pago registrado: '+money(a));return false}
 
+/* ---------- Todas las ventas ---------- */
+let vq='',vmt='',vst='',vlim=50;
+function saleDebe(z){if(!z.credit)return 0;const ab=D.payments.filter(a=>a.mid===z.id).reduce((t,a)=>t+a.amount,0);return Math.max(Math.round((saleTotal(z.id)-z.paid-ab)*100)/100,0)}
+function venFiltered(){const q=vq.toLowerCase();
+ return D.sales.filter(z=>inRange(z)&&(!vmt||(z.method||'Sin dato')===vmt)&&(!vst||(vst==='deuda'?saleDebe(z)>0.005:saleDebe(z)<=0.005))&&
+  (!q||(z.client||'').toLowerCase().includes(q)||sLines(z.id).some(x=>x.name.toLowerCase().includes(q))))
+  .sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:a.id<b.id?1:-1)}
+function venCard(z){const d=saleDebe(z),t=saleTotal(z.id);
+ return `<div class="card" onclick="saleForm('${z.id}')"><div class="row"><div><b>${fd(z.date)}${z.client?' · '+esc(z.client):''}</b><div class="mut">${lineTxt(z.id)}</div><div class="mut">${z.method||'Sin dato'}${z.credit?' · a crédito':''}</div></div>
+ <div style="text-align:right"><b>${money(t)}</b>${d>0.005?`<div><span class="pill pronto">Debe ${money(d)}</span></div>`:(z.credit?'<div><span class="pill ok">Pagada</span></div>':'')}</div></div></div>`}
+function venBody(){const l=venFiltered(),tot=l.reduce((t,z)=>t+saleTotal(z.id),0),deb=l.reduce((t,z)=>t+saleDebe(z),0);
+ return `<div class="grid"><div class="card"><div class="mut">Ventas</div><div class="big">${l.length}</div></div><div class="card"><div class="mut">Total vendido</div><div class="big">${money(tot)}</div></div>
+ <div class="card"><div class="mut">Cobrado</div><div class="big" style="color:var(--ok)">${money(tot-deb)}</div></div><div class="card"><div class="mut">Por cobrar</div><div class="big" style="color:var(--warn)">${money(deb)}</div></div></div>`+
+ (l.length?l.slice(0,vlim).map(venCard).join('')+(l.length>vlim?`<button class="btn ghost" onclick="vlim+=50;$('#vb').innerHTML=venBody()">Ver más (${l.length-vlim} restantes)</button>`:''):'<div class="empty">No hay ventas con estos filtros.</div>')}
+function vVen(){return `<h2>Todas las ventas</h2>
+ <select onchange="range=this.value;vlim=50;render()" style="margin:0 0 10px">${monthOpts()}</select>
+ <input id="vqs" placeholder="Buscar por cliente o producto" value="${esc(vq)}" oninput="vq=this.value;vlim=50;$('#vb').innerHTML=venBody()" autocomplete="off" style="margin-bottom:10px">
+ <div class="r2" style="margin-bottom:10px"><select onchange="vmt=this.value;vlim=50;$('#vb').innerHTML=venBody()" style="margin:0"><option value="">Todas las formas de pago</option>${METHODS.concat(['Sin dato']).map(m=>`<option ${m===vmt?'selected':''}>${m}</option>`).join('')}</select>
+ <select onchange="vst=this.value;vlim=50;$('#vb').innerHTML=venBody()" style="margin:0"><option value="">Con o sin deuda</option><option value="deuda" ${vst==='deuda'?'selected':''}>Con deuda pendiente</option><option value="pagada" ${vst==='pagada'?'selected':''}>Sin deuda</option></select></div>
+ <div id="vb">${venBody()}</div><p class="mut">Toca una venta para ver el detalle, corregirla o anularla.</p>`}
+
 /* ---------- Mermas ---------- */
 function autoMerma(){let n=0;
  D.products.forEach(p=>{const dead=p.lots.filter(l=>l.qty>0&&l.exp&&l.exp<today());
@@ -472,9 +493,9 @@ function render(keepFocus){
  if(!ready)return;
  const nm=autoMerma();if(nm)toast(nm+(nm==1?' lote vencido pasó':' lotes vencidos pasaron')+' a Mermas');
  const a=alerts(),n=a.v.length+a.s.length,nd=debts().length;
- const T=[['productos','Productos'],['vender','Vender'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
+ const T=[['productos','Productos'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
  $('#nav').innerHTML=T.map(([k,t])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${t}</button>`).join('');
- $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum}[tab]();
+ $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum}[tab]();
  if(keepFocus){const s=$('#s');if(s){s.focus();s.setSelectionRange(q.length,q.length)}}
 }
 window.addEventListener('fbready',boot);
