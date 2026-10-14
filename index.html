@@ -2,6 +2,9 @@
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Salyn POS</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4a2545">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{--bg:#fbf4f5;--card:#fff;--ink:#2e1a2b;--mut:#7d6a79;--pl:#4a2545;--rose:#c8456b;--ok:#2f7d5b;--warn:#b7791f;--bad:#c0392b;--line:#ecdde1}
 *{box-sizing:border-box}
@@ -453,6 +456,7 @@ window.addEventListener('online',updStatus);window.addEventListener('offline',up
 $('#nav').style.display='none';
 $('#v').innerHTML='<div class="empty">Conectando…</div>';
 if(window.FB)boot();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 <script type="module">
 const B='https://www.gstatic.com/firebasejs/10.14.1/';
