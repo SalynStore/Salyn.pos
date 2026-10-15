@@ -74,7 +74,9 @@ function migrate(){
  })}
 migrate();
 /* ---------- Nube (Firebase): entrar, guardar y sincronizar ---------- */
-let user=null,ready=false,synced={},unsubs=[],syncErr='';
+const OWNER='salyn0store@gmail.com';
+let user=null,ready=false,synced={},unsubs=[],syncErr='',role='',isOwner=false,myName='',TEAM={};
+const ADM=()=>role==='admin';
 const COLS=['products','moves','sales','payments'];
 const canon=o=>JSON.stringify(o,(k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.keys(v).sort().reduce((a,x)=>(a[x]=v[x],a),{}):v);
 const blank=()=>({products:[],moves:[],cats:CATS.slice(),reasons:REASONS.slice(),payments:[],sales:[]});
@@ -97,29 +99,38 @@ function onSnap(col,snap){let ch=false;
 function softRender(){const a=document.activeElement;
  if($('#m').className==='on'||(a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName||'')))return;render()}
 function updStatus(){const e=$('#stt');if(!ready){e.textContent='';return}
- e.textContent=syncErr?'⚠ No se guardó · toca para reintentar':(navigator.onLine?'● En línea':'● Sin internet (se guarda y sube al volver)')}
+ e.textContent=syncErr?'⚠ No se guardó · toca para reintentar':(navigator.onLine?'● En línea':'● Sin internet (se guarda y sube al volver)')+' · '+myName}
 function showLogin(msg){$('#nav').style.display='none';$('#stt').textContent='';
  $('#v').innerHTML=`<h2>Entrar</h2><div class="card"><form onsubmit="return doLogin(event)">
- <label>Correo<input name="e" type="email" required autocomplete="username" value="salyn0store@gmail.com"></label>
+ <label>Correo<input name="e" type="email" required autocomplete="username" value="${esc(localStorage.getItem('salyn_email')||'')}"></label>
  <label>Contraseña<input name="p" type="password" required autocomplete="current-password"></label>
- <button class="btn">Entrar</button></form>${msg?`<p style="color:var(--bad)">${esc(msg)}</p>`:''}</div>`}
-const authMsg=e=>({'auth/invalid-credential':'Correo o contraseña incorrectos.','auth/wrong-password':'Correo o contraseña incorrectos.','auth/user-not-found':'Correo o contraseña incorrectos.','auth/too-many-requests':'Demasiados intentos. Espera unos minutos.','auth/network-request-failed':'Sin internet. Revisa tu conexión.'})[e.code]||'No se pudo entrar: '+(e.code||e.message);
+ <button class="btn">Entrar</button></form><p class="mut" style="margin-top:12px"><a href="#" onclick="forgot();return false">Olvidé mi contraseña</a></p>${msg?`<p style="color:var(--bad)">${esc(msg)}</p>`:''}</div>`}
+const authMsg=e=>({'auth/invalid-credential':'Correo o contraseña incorrectos.','auth/wrong-password':'Correo o contraseña incorrectos.','auth/user-not-found':'Correo o contraseña incorrectos.','auth/too-many-requests':'Demasiados intentos. Espera unos minutos.','auth/network-request-failed':'Sin internet. Revisa tu conexión.','auth/weak-password':'La contraseña debe tener al menos 6 caracteres.','auth/invalid-email':'Ese correo no es válido.'})[e.code]||'No se pudo entrar: '+(e.code||e.message);
 async function doLogin(e){e.preventDefault();const f=new FormData(e.target);
- try{await FB.login(f.get('e').trim(),f.get('p'))}catch(err){showLogin(authMsg(err))}return false}
-function stopSync(){unsubs.forEach(f=>f());unsubs=[];ready=false;synced={};D=blank();cart=[];pd={}}
+ try{await FB.login(f.get('e').trim(),f.get('p'));try{localStorage.setItem('salyn_email',f.get('e').trim())}catch(x){}}catch(err){showLogin(authMsg(err))}return false}
+function forgot(){const em=($('input[name=e]').value||'').trim();if(!em){toast('Escribe tu correo arriba y vuelve a tocar');return}
+ FB.reset(em).then(()=>toast('Te enviamos un correo para cambiar la contraseña (revisa también Spam)',5000)).catch(e=>toast(authMsg(e)))}
+function stopSync(){unsubs.forEach(f=>f());unsubs=[];ready=false;synced={};D=blank();cart=[];pd={};role='';isOwner=false;myName='';TEAM={}}
 async function startSync(){
  $('#v').innerHTML='<div class="empty">Cargando tus datos…</div>';
  stopSync();
+ const em=(user.email||'').toLowerCase();
+ if(em===OWNER){role='admin';isOwner=true;myName='Dueña'}
+ else{let t=null;
+  try{t=await FB.getDoc('team',em)}catch(e){showNoAccess('No se pudo verificar tu acceso. Revisa tu internet e inténtalo de nuevo.',true);return}
+  if(!t||!['admin','vendedor'].includes(t.role)){showNoAccess('Tu correo no tiene acceso a esta tienda. Pídele a la dueña que te agregue en la pestaña Equipo.');return}
+  role=t.role;myName=t.name||em.split('@')[0]}
  const firsts=[...COLS,'config'].map(col=>new Promise(res=>{let done=false;
   unsubs.push(FB.listen(col,snap=>{onSnap(col,snap);if(!done&&(!snap.metadata.fromCache||!navigator.onLine||snap.size>0)){done=true;res()}},
    err=>{res();toast('No se pudo leer '+col+': '+(err.code||''))}))}));
+ if(isOwner)unsubs.push(FB.listen('team',snap=>{snap.docChanges().forEach(c=>{if(c.type==='removed')delete TEAM[c.doc.id];else TEAM[c.doc.id]=c.doc.data()});if(ready&&tab==='equipo')softRender()},()=>{}));
  await Promise.race([Promise.all(firsts),new Promise(r=>setTimeout(r,8000))]);
  normalize();
  if(!synced['config/main'])synced['config/main']=canon({cats:D.cats,reasons:D.reasons});
  ready=true;$('#nav').style.display='flex';updStatus();
  const loc=localStorage.getItem('salynpos');
- if(loc&&!D.products.length&&!D.moves.length){try{const d=JSON.parse(loc);if(d.products&&d.products.length)offerImport(d)}catch(e){}}
- migrate();save();render()}
+ if(loc&&ADM()&&!D.products.length&&!D.moves.length){try{const d=JSON.parse(loc);if(d.products&&d.products.length)offerImport(d)}catch(e){}}
+ tab=ADM()?'productos':'vender';migrate();save();render()}
 function offerImport(d){
  modal(`<h2>Encontré datos en este aparato</h2><p>Hay ${d.products.length} producto(s) y ${(d.moves||[]).length} movimiento(s) guardados solo aquí. ¿Los subo a la nube para verlos en todos tus aparatos?</p>
  <button class="btn" onclick="doImport()">Sí, subirlos</button><button class="btn ghost" onclick="closeM()">No, empezar vacío</button>`);window._imp=d}
@@ -190,14 +201,14 @@ function vProd(){
   <input placeholder="Buscar por nombre o código" value="${esc(q)}" oninput="q=this.value;render(true)" id="s">
   <div class="r2" style="margin-top:10px">
    <select onchange="fc=this.value;render()" style="margin:0"><option value="">Todas las categorías</option>${D.cats.map(c=>`<option ${c===fc?'selected':''}>${esc(c)}</option>`).join('')}</select>
-   <button class="btn ghost" style="margin:0;padding:10px" onclick="catForm()">Editar categorías</button></div>
-  <button class="btn" onclick="pForm('')" style="margin:10px 0 12px">+ Nuevo producto</button>`+
-  (l.length?l.map(p=>{const s=st(p),ne=nextExp(p);return `<div class="card" onclick="pForm('${p.id}')">
+   ${ADM()?'<button class="btn ghost" style="margin:0;padding:10px" onclick="catForm()">Editar categorías</button>':'<span></span>'}</div>
+  ${ADM()?'<button class="btn" onclick="pForm(\'\')" style="margin:10px 0 12px">+ Nuevo producto</button>':'<div style="height:12px"></div>'}`+
+  (l.length?l.map(p=>{const s=st(p),ne=nextExp(p);return `<div class="card" ${ADM()?`onclick="pForm('${p.id}')"`:''}>
     <div class="row"><b>${esc(p.name)}</b><span class="pill ${s}">${s==='vencido'?'Tiene vencidos':s==='pronto'?'Vence '+fd(ne):'Stock '+un(stock(p),p.unit)}</span></div>
     <div class="mut"><span class="code">${esc(p.code)}</span> · ${esc(p.cat)} · Stock total ${un(stock(p),p.unit)}</div>
-    <div class="mut">Costo ${money(p.cost)} · Venta ${money(p.price)} por ${p.unit} · Ganas ${money(p.price-p.cost)}</div>
+    <div class="mut">${ADM()?`Costo ${money(p.cost)} · Venta ${money(p.price)} por ${p.unit} · Ganas ${money(p.price-p.cost)}`:`Precio ${money(p.price)} por ${p.unit}`}</div>
     ${p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}</span><span class="pill ${ls(x)}">${ls(x)==='vencido'?'Vencido':ls(x)==='pronto'?'Por vencer':'Bien'}</span></div>`).join('')}</div>`}).join(''):
-  `<div class="empty">${D.products.length?'No encontré productos con ese filtro.':'Aún no tienes productos. Toca “+ Nuevo producto” para empezar.'}</div>`);
+  `<div class="empty">${D.products.length?'No encontré productos con ese filtro.':(ADM()?'Aún no tienes productos. Toca “+ Nuevo producto” para empezar.':'Aún no hay productos registrados.')}</div>`);
 }
 function pForm(id){const p=P(id)||{};
  modal(`<h2>${id?'Editar producto':'Nuevo producto'}</h2><form onsubmit="return savP(event,'${id}')">
@@ -311,21 +322,22 @@ function doSell(e){e.preventDefault();const f=new FormData(e.target);
   p.lots=p.lots.filter(l=>l.qty>0);
   D.moves.push(Object.assign(mv('out',p,c.qty,cost/c.qty,c.price),{date:dt,sid,lots:used}))});
  const paid=cr?Math.min(Math.max(+f.get('pg')||0,0),total):total,debe=total-paid;
- D.sales.push({id:sid,date:dt,method:f.get('m'),paid,credit:cr&&debe>0.005,client:cl});
+ D.sales.push({id:sid,date:dt,method:f.get('m'),paid,credit:cr&&debe>0.005,client:cl,by:myName});
  const rest=[...new Set(cart.map(c=>c.pid))].map(id=>{const q=P(id);return q?q.name+': quedan '+un(stock(q),q.unit):''}).filter(Boolean).join(' · ');
  cart=[];pd={};vsq='';vsel='';save();toast((debe>0.005?'Venta a crédito: debe '+money(debe):'Venta registrada: '+money(total))+' — Inventario descontado ('+rest+')',6000);render();return false}
 function saleForm(id){const z=S(id);if(!z)return;const ab=D.payments.filter(a=>a.mid===id);
  modal(`<h2>Venta del ${fd(z.date)}</h2>`+sLines(id).map(x=>`<div class="lot"><span>${esc(x.name)} · ${un(x.qty,x.unit||'unidad')} × ${money(x.price)}</span><b>${money(x.qty*x.price)}</b></div>`).join('')+
  `<div class="row" style="margin:8px 0"><b>Total</b><b>${money(saleTotal(id))}</b></div>
  <div class="mut">Pagó al vender: ${money(z.paid)}${ab.length?' · Pagos posteriores: '+money(ab.reduce((t,a)=>t+a.amount,0)):''}</div>
- <h3>Corregir datos</h3><form onsubmit="return editSale(event,'${id}')">
+ <div class="mut">${z.method||'Sin dato'}${z.client?' · Cliente: '+esc(z.client):''}${z.by?' · Vendió: '+esc(z.by):''}</div>`+
+ (ADM()?`<h3>Corregir datos</h3><form onsubmit="return editSale(event,'${id}')">
  <div class="r2"><label>Fecha<input name="d" type="date" min="2025-09-01" max="${today()}" value="${z.date}" required></label>
  <label>Forma de pago<select name="m">${METHODS.map(m=>`<option ${m===z.method?'selected':''}>${m}</option>`).join('')}</select></label></div>
  <label>Cliente<input name="cl" value="${esc(z.client||'')}" placeholder="Nombre (obligatorio si es fiado)"></label>
  <button class="btn">Guardar cambios</button></form>
- <button class="btn ghost" style="color:var(--bad)" onclick="voidSale('${id}')">Anular venta</button>
- <button class="btn ghost" onclick="closeM()">Cerrar</button>
- <p class="mut">Si te equivocaste de producto, cantidad o precio: anula la venta (el stock vuelve a su lote) y regístrala de nuevo.</p>`)}
+ <button class="btn ghost" style="color:var(--bad)" onclick="voidSale('${id}')">Anular venta</button>`:'')+
+ `<button class="btn ghost" onclick="closeM()">Cerrar</button>`+
+ (ADM()?`<p class="mut">Si te equivocaste de producto, cantidad o precio: anula la venta (el stock vuelve a su lote) y regístrala de nuevo.</p>`:'<p class="mut">Si hay un error en esta venta, avísale a la dueña para corregirla.</p>'))}
 function editSale(e,id){e.preventDefault();const f=new FormData(e.target),z=S(id),dt=f.get('d'),cl=(f.get('cl')||'').trim();
  if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
  if(z.credit&&!cl){toast('Escribe el nombre del cliente que debe');return false}
@@ -365,28 +377,64 @@ function payForm(id){const d=debts().find(z=>z.s.id===id);if(!d)return;const his
 function doPay(e,id){e.preventDefault();const f=new FormData(e.target),d=debts().find(z=>z.s.id===id),a=Math.round(+f.get('a')*100)/100,dt=f.get('d');
  if(!d)return false;if(a<=0||a>d.debe+0.005){toast('El monto no puede pasar de '+money(d.debe));return false}
  if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
- D.payments.push({id:uid(),mid:id,date:dt,amount:a,method:f.get('m')});save();closeM();render();toast('Pago registrado: '+money(a));return false}
+ D.payments.push({id:uid(),mid:id,date:dt,amount:a,method:f.get('m'),by:myName});save();closeM();render();toast('Pago registrado: '+money(a));return false}
 
 /* ---------- Todas las ventas ---------- */
-let vq='',vmt='',vst='',vlim=50;
+let vq='',vmt='',vst='',vby='',vlim=50;
 function saleDebe(z){if(!z.credit)return 0;const ab=D.payments.filter(a=>a.mid===z.id).reduce((t,a)=>t+a.amount,0);return Math.max(Math.round((saleTotal(z.id)-z.paid-ab)*100)/100,0)}
 function venFiltered(){const q=vq.toLowerCase();
- return D.sales.filter(z=>inRange(z)&&(!vmt||(z.method||'Sin dato')===vmt)&&(!vst||(vst==='deuda'?saleDebe(z)>0.005:saleDebe(z)<=0.005))&&
+ return D.sales.filter(z=>inRange(z)&&(!vmt||(z.method||'Sin dato')===vmt)&&(!vst||(vst==='deuda'?saleDebe(z)>0.005:saleDebe(z)<=0.005))&&(!vby||(z.by||'Sin dato')===vby)&&
   (!q||(z.client||'').toLowerCase().includes(q)||sLines(z.id).some(x=>x.name.toLowerCase().includes(q))))
   .sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:a.id<b.id?1:-1)}
 function venCard(z){const d=saleDebe(z),t=saleTotal(z.id);
- return `<div class="card" onclick="saleForm('${z.id}')"><div class="row"><div><b>${fd(z.date)}${z.client?' · '+esc(z.client):''}</b><div class="mut">${lineTxt(z.id)}</div><div class="mut">${z.method||'Sin dato'}${z.credit?' · a crédito':''}</div></div>
+ return `<div class="card" onclick="saleForm('${z.id}')"><div class="row"><div><b>${fd(z.date)}${z.client?' · '+esc(z.client):''}</b><div class="mut">${lineTxt(z.id)}</div><div class="mut">${z.method||'Sin dato'}${z.credit?' · a crédito':''}${z.by?' · '+esc(z.by):''}</div></div>
  <div style="text-align:right"><b>${money(t)}</b>${d>0.005?`<div><span class="pill pronto">Debe ${money(d)}</span></div>`:(z.credit?'<div><span class="pill ok">Pagada</span></div>':'')}</div></div></div>`}
 function venBody(){const l=venFiltered(),tot=l.reduce((t,z)=>t+saleTotal(z.id),0),deb=l.reduce((t,z)=>t+saleDebe(z),0);
  return `<div class="grid"><div class="card"><div class="mut">Ventas</div><div class="big">${l.length}</div></div><div class="card"><div class="mut">Total vendido</div><div class="big">${money(tot)}</div></div>
  <div class="card"><div class="mut">Cobrado</div><div class="big" style="color:var(--ok)">${money(tot-deb)}</div></div><div class="card"><div class="mut">Por cobrar</div><div class="big" style="color:var(--warn)">${money(deb)}</div></div></div>`+
  (l.length?l.slice(0,vlim).map(venCard).join('')+(l.length>vlim?`<button class="btn ghost" onclick="vlim+=50;$('#vb').innerHTML=venBody()">Ver más (${l.length-vlim} restantes)</button>`:''):'<div class="empty">No hay ventas con estos filtros.</div>')}
+function vendSel(){const v=[...new Set(D.sales.map(z=>z.by||'Sin dato'))];
+ return v.length>1?`<select onchange="vby=this.value;vlim=50;$('#vb').innerHTML=venBody()" style="margin:0 0 10px"><option value="">Todos los vendedores</option>${v.map(x=>`<option ${x===vby?'selected':''}>${esc(x)}</option>`).join('')}</select>`:''}
 function vVen(){return `<h2>Todas las ventas</h2>
  <select onchange="range=this.value;vlim=50;render()" style="margin:0 0 10px">${monthOpts()}</select>
  <input id="vqs" placeholder="Buscar por cliente o producto" value="${esc(vq)}" oninput="vq=this.value;vlim=50;$('#vb').innerHTML=venBody()" autocomplete="off" style="margin-bottom:10px">
  <div class="r2" style="margin-bottom:10px"><select onchange="vmt=this.value;vlim=50;$('#vb').innerHTML=venBody()" style="margin:0"><option value="">Todas las formas de pago</option>${METHODS.concat(['Sin dato']).map(m=>`<option ${m===vmt?'selected':''}>${m}</option>`).join('')}</select>
  <select onchange="vst=this.value;vlim=50;$('#vb').innerHTML=venBody()" style="margin:0"><option value="">Con o sin deuda</option><option value="deuda" ${vst==='deuda'?'selected':''}>Con deuda pendiente</option><option value="pagada" ${vst==='pagada'?'selected':''}>Sin deuda</option></select></div>
- <div id="vb">${venBody()}</div><p class="mut">Toca una venta para ver el detalle, corregirla o anularla.</p>`}
+ ${vendSel()}<div id="vb">${venBody()}</div><p class="mut">Toca una venta para ver el detalle, corregirla o anularla.</p>`}
+
+/* ---------- Equipo (solo la dueña) ---------- */
+function showNoAccess(msg,retry){$('#nav').style.display='none';$('#stt').textContent='';
+ $('#v').innerHTML=`<h2>Sin acceso</h2><div class="card"><p>${esc(msg)}</p><p class="mut">Tu correo: ${esc(user?user.email:'')}</p>
+ ${retry?'<button class="btn" onclick="location.reload()">Reintentar</button>':''}<button class="btn ghost" onclick="FB.logout()">Cerrar sesión</button></div>`}
+function vEqu(){const l=Object.values(TEAM).sort((a,b)=>a.email<b.email?-1:1);
+ return `<h2>Equipo</h2><p class="mut">Las personas que agregues entran con su correo y su contraseña, y ven los datos de Salyn.</p>
+ <button class="btn" onclick="memberForm()">+ Agregar persona</button>
+ <div class="card" style="margin-top:12px"><div class="row"><div><b>${esc(myName)}</b><div class="mut">${esc(user.email)}</div></div><span class="pill ok">Dueña</span></div></div>`+
+ l.map(m=>`<div class="card"><div class="row"><div><b>${esc(m.name||m.email)}</b><div class="mut">${esc(m.email)}</div></div><span class="pill ${m.role==='admin'?'pronto':'ok'}">${m.role==='admin'?'Administrador':'Vendedor'}</span></div>
+  <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn sm ghost" onclick="roleToggle('${esc(m.email)}')">Cambiar a ${m.role==='admin'?'vendedor':'administrador'}</button>
+  <button class="btn sm ghost" onclick="resetPw('${esc(m.email)}')">Enviar cambio de contraseña</button>
+  <button class="btn sm ghost" style="color:var(--bad)" onclick="delMember('${esc(m.email)}')">Quitar acceso</button></div></div>`).join('')+
+ `<div class="card"><b>Qué puede hacer cada uno</b>
+ <div class="mut" style="margin-top:6px"><b>Vendedor:</b> vender, ver las ventas, ver productos y precios (sin costos ni ganancias), cobrar deudas y ver alertas.</div>
+ <div class="mut" style="margin-top:6px"><b>Administrador:</b> todo lo anterior, más productos, entradas, mermas, corregir o anular ventas y el resumen.</div>
+ <div class="mut" style="margin-top:6px"><b>Dueña (tú):</b> todo, y además manejar el equipo.</div></div>`}
+function memberForm(){modal(`<h2>Agregar persona</h2><form onsubmit="return addMember(event)">
+ <label>Nombre<input name="n" required placeholder="Ej: Ana"></label>
+ <label>Correo<input name="e" type="email" required placeholder="correo@gmail.com"></label>
+ <label>Puede<select name="r"><option value="vendedor">Vender (vendedor)</option><option value="admin">Ver y manejar todo (administrador)</option></select></label>
+ <label>Contraseña temporal (mínimo 6 caracteres)<input name="p" type="text" minlength="6" required></label>
+ <p class="mut">Pásale su correo y esta contraseña. Después puede cambiarla con "Olvidé mi contraseña" en la pantalla de entrada.</p>
+ <button class="btn">Agregar</button><button type="button" class="btn ghost" onclick="closeM()">Cancelar</button></form>`)}
+async function addMember(e){e.preventDefault();const f=new FormData(e.target),em=(f.get('e')||'').trim().toLowerCase(),nm=(f.get('n')||'').trim(),rl=f.get('r'),pw=f.get('p')||'';
+ if(em===OWNER){toast('Ese es tu correo de dueña');return false}
+ if(TEAM[em]){toast('Esa persona ya está en el equipo');return false}
+ let msg='';
+ try{await FB.createUser(em,pw)}catch(err){if(err.code==='auth/email-already-in-use')msg=' (ya tenía cuenta: entra con su contraseña de siempre)';else{toast(authMsg(err));return false}}
+ try{await FB.write([{col:'team',id:em,data:{email:em,name:nm,role:rl}}])}catch(err){toast('No se pudo agregar: '+(err.code||''));return false}
+ closeM();toast('Agregada: '+nm+msg,5000);return false}
+function roleToggle(em){const m=TEAM[em];if(!m)return;FB.write([{col:'team',id:em,data:Object.assign({},m,{role:m.role==='admin'?'vendedor':'admin'})}]).catch(e=>toast('No se pudo cambiar: '+(e.code||'')))}
+function resetPw(em){FB.reset(em).then(()=>toast('Le enviamos un correo para cambiar su contraseña',4000)).catch(e=>toast(authMsg(e)))}
+function delMember(em){if(!confirm('¿Quitar el acceso a '+em+'? Ya no podrá ver ni guardar datos.'))return;FB.write([{col:'team',id:em,del:true}]).catch(e=>toast('No se pudo quitar: '+(e.code||'')))}
 
 /* ---------- Mermas ---------- */
 function autoMerma(){let n=0;
@@ -452,6 +500,7 @@ function vSum(){
  D.sales.filter(inRange).forEach(z=>{const k=z.method||'Sin dato';pay[k]=(pay[k]||0)+z.paid});
  D.payments.filter(a=>range==='todo'?a.date>='2025-09-01':a.date.slice(0,7)===range).forEach(a=>{pay[a.method]=(pay[a.method]||0)+a.amount});
  const cobrado=Object.values(pay).reduce((s,v)=>s+v,0),porCobrar=debts().reduce((s,d)=>s+d.debe,0);
+ const byV={};D.sales.filter(inRange).forEach(z=>{const k=z.by||'Sin dato';byV[k]=(byV[k]||0)+saleTotal(z.id)});
  const cmp=D.moves.filter(x=>x.type==='in'&&x.date>='2025-09-01').reduce((t,x)=>t+x.qty*x.cost,0);
  const cobT=D.sales.filter(z=>z.date>='2025-09-01').reduce((t,z)=>t+z.paid,0)+D.payments.filter(a=>a.date>='2025-09-01').reduce((t,a)=>t+a.amount,0);
  const bal=Math.round((cobT-cmp)*100)/100,pct=cmp>0?cobT/cmp*100:0;
@@ -466,6 +515,7 @@ function vSum(){
  <div class="card"><div class="mut">Pérdida por mermas</div><div class="big" style="color:var(--bad)">${money(loss)}</div></div></div>
  <div class="card"><div class="mut">Cobrado en este período</div><div class="big">${money(cobrado)}</div>${Object.entries(pay).filter(([k,v])=>k!=='Sin dato'||v>0).map(([k,v])=>`<div class="row mut"><span>${k}</span><b>${money(v)}</b></div>`).join('')}</div>
  <div class="card"><div class="mut">Por cobrar (fiados pendientes, a hoy)</div><div class="big" style="color:var(--warn)">${money(porCobrar)}</div></div>
+ ${Object.keys(byV).length>1?`<div class="card"><b>Ventas por persona</b><div class="mut">Del período elegido</div>${Object.entries(byV).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="row" style="margin-top:6px"><span>${esc(k)}</span><b>${money(v)}</b></div>`).join('')}</div>`:''}
  <div class="card"><b>¿Ya recuperé mi inversión?</b><div class="mut">Todo, desde el 01/09/2025 (no depende del mes elegido)</div>
  <div class="big" style="color:${bal>=0?'var(--ok)':'var(--bad)'};margin-top:6px">${cmp===0?'Aún sin compras':bal>=0?'Sí ✅':'Todavía no'}</div>
  <div style="background:#f1e4e8;border-radius:99px;height:10px;margin:8px 0;overflow:hidden"><div style="width:${Math.min(pct,100)}%;height:100%;background:${bal>=0?'var(--ok)':'var(--rose)'}"></div></div>
@@ -493,9 +543,13 @@ function render(keepFocus){
  if(!ready)return;
  const nm=autoMerma();if(nm)toast(nm+(nm==1?' lote vencido pasó':' lotes vencidos pasaron')+' a Mermas');
  const a=alerts(),n=a.v.length+a.s.length,nd=debts().length;
- const T=[['productos','Productos'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
+ const ALL=[['productos','Productos'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
+ if(isOwner)ALL.push(['equipo','Equipo']);
+ const OKV=['vender','ventas','deudas','productos','alertas'];
+ const T=ADM()?ALL:OKV.map(k=>ALL.find(x=>x[0]===k));
+ if(!T.some(x=>x[0]===tab))tab=T[0][0];
  $('#nav').innerHTML=T.map(([k,t])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${t}</button>`).join('');
- $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum}[tab]();
+ $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu}[tab]();
  if(keepFocus){const s=$('#s');if(s){s.focus();s.setSelectionRange(q.length,q.length)}}
 }
 window.addEventListener('fbready',boot);
@@ -510,13 +564,14 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(
 const B='https://www.gstatic.com/firebasejs/10.14.1/';
 try{
  const [A,Au,Fs]=await Promise.all([import(B+'firebase-app.js'),import(B+'firebase-auth.js'),import(B+'firebase-firestore.js')]);
- const app=A.initializeApp({
+ const cfg={
   apiKey:"AIzaSyB376TG_n1ldzPf0j-9PMLu2nitp4x1-cM",
   authDomain:"salyn-pos.firebaseapp.com",
   projectId:"salyn-pos",
   storageBucket:"salyn-pos.firebasestorage.app",
   messagingSenderId:"349247318017",
-  appId:"1:349247318017:web:ca432cb281bb32162d3800"});
+  appId:"1:349247318017:web:ca432cb281bb32162d3800"};
+ const app=A.initializeApp(cfg);
  const auth=Au.getAuth(app);
  let db;
  try{db=Fs.initializeFirestore(app,{localCache:Fs.persistentLocalCache({tabManager:Fs.persistentMultipleTabManager()})})}catch(e){db=Fs.getFirestore(app)}
@@ -525,6 +580,11 @@ try{
   logout:()=>Au.signOut(auth),
   onAuth:cb=>Au.onAuthStateChanged(auth,cb),
   listen:(col,cb,er)=>Fs.onSnapshot(Fs.collection(db,col),cb,er),
+  getDoc:async(col,id)=>{const d=await Fs.getDoc(Fs.doc(db,col,id));return d.exists()?d.data():null},
+  reset:email=>Au.sendPasswordResetEmail(auth,email),
+  createUser:async(email,pass)=>{const sec=A.initializeApp(cfg,'sec'+Date.now());
+   try{await Au.createUserWithEmailAndPassword(Au.getAuth(sec),email,pass)}
+   finally{try{await Au.signOut(Au.getAuth(sec))}catch(e){}try{await A.deleteApp(sec)}catch(e){}}},
   write:async ops=>{for(let i=0;i<ops.length;i+=400){const b=Fs.writeBatch(db);
    ops.slice(i,i+400).forEach(o=>{const r=Fs.doc(db,o.col,o.id);o.del?b.delete(r):b.set(r,o.data)});await b.commit()}}};
  window.dispatchEvent(new Event('fbready'));
