@@ -48,7 +48,7 @@ nav button.on{color:var(--rose);font-weight:700;box-shadow:inset 0 3px 0 var(--r
 .tks{font-size:14px;color:#ebd3d6;background:rgba(251,243,240,.1);border-radius:8px;padding:8px 10px;margin-bottom:10px}
 .tkb{display:flex;justify-content:space-between;border-top:1px dashed rgba(251,243,240,.3);padding-top:10px;font-size:13px;color:rgba(251,243,240,.7)}
 .tkb b{display:block;color:#fbf3f0;font-size:15px}
-.tkw{background:#7a1f1f;border-radius:8px;padding:8px 10px;margin-top:10px;font-size:13px}
+.tkw{color:#fff;background:#7a1f1f;border-radius:8px;padding:8px 10px;margin-top:10px;font-size:13px}
 </style></head><body>
 <header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span><span id="stt" onclick="retrySave()" style="float:right;font-size:13px;color:#e9c9d6;cursor:pointer"></span></header>
 <main id="v"></main>
@@ -70,6 +70,7 @@ function migrate(){
  if(!D.reasons||!D.reasons.length)D.reasons=REASONS.slice();
  if(!D.payments)D.payments=[];
  if(!D.sales)D.sales=[];
+ if(!D.combos)D.combos=[];
  const yp=m=>/^Yape \d$/.test(m||'')?'Yape':m;
  D.moves.forEach(x=>{if(x.type==='out'&&!x.sid){x.sid=x.id;D.sales.push({id:x.id,date:x.date,method:yp(x.method)||'',paid:x.paid??x.qty*x.price,credit:!!x.credit,client:x.client||''})}});
  D.sales.forEach(z=>{z.method=yp(z.method)||''});D.payments.forEach(a=>{a.method=yp(a.method)});
@@ -85,9 +86,9 @@ migrate();
 const OWNER='salyn0store@gmail.com';
 let user=null,ready=false,synced={},unsubs=[],syncErr='',role='',isOwner=false,myName='',TEAM={};
 const ADM=()=>role==='admin';
-const COLS=['products','moves','sales','payments'];
+const COLS=['products','moves','sales','payments','combos'];
 const canon=o=>JSON.stringify(o,(k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.keys(v).sort().reduce((a,x)=>(a[x]=v[x],a),{}):v);
-const blank=()=>({products:[],moves:[],cats:CATS.slice(),reasons:REASONS.slice(),payments:[],sales:[]});
+const blank=()=>({products:[],moves:[],cats:CATS.slice(),reasons:REASONS.slice(),payments:[],sales:[],combos:[]});
 function save(){
  if(!ready)return;const ops=[];
  COLS.forEach(c=>{const seen={};
@@ -154,7 +155,7 @@ async function exportXlsx(){
  add('Productos',D.products.map(p=>({'Código':p.code,Producto:p.name,'Categoría':p.cat,'Presentación':p.unit,Costo:p.cost,'Precio venta':p.price,Stock:stock(p),'Avisar si quedan ≤':p.min})));
  add('Lotes',D.products.flatMap(p=>p.lots.map(l=>({'Código':p.code,Producto:p.name,Cantidad:l.qty,'Costo por unidad':l.cost,'Fecha entrega':l.date,Vencimiento:l.exp}))));
  add('Ventas',D.sales.map(z=>({Fecha:z.date,Cliente:z.client,'Forma de pago':z.method||'Sin dato',Productos:sLines(z.id).map(x=>x.name+' ×'+x.qty).join(', '),Total:saleTotal(z.id),'Pagó al vender':z.paid,'A crédito':z.credit?'Sí':'No'})));
- add('Detalle ventas',D.moves.filter(x=>x.type==='out').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Precio:x.price,Costo:x.cost,Ganancia:x.qty*(x.price-x.cost)})));
+ add('Detalle ventas',D.moves.filter(x=>x.type==='out').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Precio:x.price,Costo:x.cost,Combo:x.combo||'',Ganancia:x.qty*(x.price-x.cost)})));
  add('Pagos de deudas',D.payments.map(a=>{const z=S(a.mid);return{Fecha:a.date,Cliente:z?z.client:'',Monto:a.amount,'Forma de pago':a.method}}));
  add('Entradas',D.moves.filter(x=>x.type==='in').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost})));
  add('Mermas',D.moves.filter(x=>x.type==='merma').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost,'Pérdida':x.qty*x.cost,Motivo:x.reason||'Vencido',Nota:x.note||''})));
@@ -292,11 +293,12 @@ function doIn(e){e.preventDefault();const f=new FormData(e.target),p=P(f.get('p'
 const S=id=>D.sales.find(x=>x.id===id);
 const sLines=sid=>D.moves.filter(x=>x.type==='out'&&x.sid===sid);
 const saleTotal=sid=>sLines(sid).reduce((t,x)=>t+x.qty*x.price,0);
-const lineTxt=sid=>sLines(sid).map(x=>esc(x.name)+' ×'+x.qty).join(', ');
+const lineTxt=sid=>{const l=sLines(sid),cb=[...new Set(l.map(x=>x.combo).filter(Boolean))];return l.map(x=>esc(x.name)+' ×'+x.qty).join(', ')+(cb.length?' · Combo: '+cb.map(esc).join(', '):'')};
 const cartQty=pid=>cart.filter(c=>c.pid===pid).reduce((t,c)=>t+c.qty,0);
 const cartTotal=()=>cart.reduce((t,c)=>t+c.qty*c.price,0);
-function payTxt(){if(!pd.cr)return'';const t=cartTotal(),pg=+pd.pg||0;return'Pagó '+money(Math.min(pg,t))+' · Debe '+money(Math.max(t-pg,0))}
-function savePd(form){const f=new FormData(form);pd={d:f.get('d'),m:f.get('m'),cr:f.get('cr')==='on',cl:f.get('cl')||'',pg:f.get('pg')||'0'}}
+const cartDisc=()=>{const t=cartTotal(),v=+pd.ds||0;return Math.min(t,pd.dt==='P'?t*Math.min(v,100)/100:v)};
+function payTxt(){const d=cartDisc(),t=cartTotal()-d,pg=+pd.pg||0;return(d>0?'Descuento '+money(d)+' · ':'')+(pd.cr?'Pagó '+money(Math.min(pg,t))+' · Debe '+money(Math.max(t-pg,0)):'')}
+function savePd(form){const f=new FormData(form);pd={d:f.get('d'),m:f.get('m'),cr:f.get('cr')==='on',cl:f.get('cl')||'',pg:f.get('pg')||'0',ds:f.get('ds')||'',dt:f.get('dt')||'S'}}
 function saleCard(z){return `<div class="card" onclick="saleForm('${z.id}')"><div class="row"><div><b>${fd(z.date)}${z.client?' · '+esc(z.client):''}</b><div class="mut">${lineTxt(z.id)}</div></div>
  <div style="text-align:right"><b>${money(saleTotal(z.id))}</b><div class="mut">${z.method||'Sin dato'}${z.credit?' · fiado':''}</div></div></div></div>`}
 function vSell(){
@@ -311,16 +313,18 @@ function vSell(){
   <button class="btn ghost">+ Agregar a la venta</button></form></div>`
   :`<div class="empty">${cart.length?'Ya agregaste todo el stock disponible.':'No tienes productos disponibles para vender. Registra una entrada o revisa Alertas.'}</div>`;
   const cartH=cart.length?`<div class="card"><b>Venta actual</b>`+cart.map((c,i)=>{const q=P(c.pid);
-   return `<div class="lot"><span>${esc(q?q.name:'?')} · ${un(c.qty,q?q.unit:'unidad')} × ${money(c.price)}</span><span><b>${money(c.qty*c.price)}</b> <button class="btn sm ghost" onclick="rmCart(${i})">Quitar</button></span></div>`}).join('')+
+   return `<div class="lot"><span>${esc(q?q.name:'?')}${c.combo?` <span class="pill ok">${esc(c.combo)}</span>`:''} · ${un(c.qty,q?q.unit:'unidad')} × ${money(c.price)}</span><span><b>${money(c.qty*c.price)}</b> <button class="btn sm ghost" onclick="rmCart(${i})">Quitar</button></span></div>`}).join('')+
   `<form onsubmit="return doSell(event)" onchange="savePd(this)" oninput="savePd(this)" style="margin-top:12px">
   <label>Fecha de la venta<input name="d" type="date" min="2025-09-01" max="${today()}" value="${pd.d||today()}" required></label>
   <label>Forma de pago<select name="m">${METHODS.map(m=>`<option ${m===pd.m?'selected':''}>${m}</option>`).join('')}</select></label>
   <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:16px"><input type="checkbox" name="cr" id="cr" style="width:auto;margin:0" onchange="tot()" ${pd.cr?'checked':''}> Venta a crédito (fiado)</label>
   <div id="crb" style="display:${pd.cr?'block':'none'}"><label>Cliente que debe<input name="cl" value="${esc(pd.cl||'')}" placeholder="Nombre"></label>
   <label>Pagó ahora (S/)<input name="pg" id="pg" type="number" step="0.01" min="0" value="${pd.pg||0}" oninput="tot()"></label></div>
-  <div class="big" id="tt">${money(cartTotal())}</div><div class="mut" id="dd">${payTxt()}</div><div class="mut" style="margin-bottom:8px">Total de la venta</div>
+  <div class="r2"><label>Descuento (opcional)<input name="ds" id="ds" type="number" step="0.01" min="0" value="${pd.ds||''}" oninput="tot()"></label>
+  <label>En<select name="dt" id="dt" onchange="tot()"><option value="S" ${pd.dt!=='P'?'selected':''}>Soles (S/)</option><option value="P" ${pd.dt==='P'?'selected':''}>Porcentaje (%)</option></select></label></div>
+  <div class="big" id="tt">${money(cartTotal()-cartDisc())}</div><div class="mut" id="dd">${payTxt()}</div><div class="mut" style="margin-bottom:8px">Total de la venta</div>
   <button class="btn">Registrar venta</button><button type="button" class="btn ghost" onclick="cart=[];pd={};render()">Vaciar venta</button></form></div>`:'';
-  return `<h2>Vender</h2>`+add+cartH+`<p class="mut">Se vende primero el lote que vence antes. Los lotes vencidos no se pueden vender.</p>`+
+  return `<h2>Vender</h2>`+add+cmbSell()+cartH+`<p class="mut">Se vende primero el lote que vence antes. Los lotes vencidos no se pueden vender.</p>`+
    (rec.length?`<h3>Ventas recientes (toca una para corregirla o anularla)</h3>`+rec.map(saleCard).join(''):'')}
 function pickList(){const q=vsq.toLowerCase();
  return D.products.filter(p=>sellable(p)-cartQty(p.id)>0&&(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q)))}
@@ -332,32 +336,32 @@ function renderPick(force){const l=pickList(),changed=!l.some(p=>p.id===vsel);
 function pickP(id){vsel=id;renderPick(true)}
 function fillSell(id){const p=P(id);$('#sp').value=p.price;$('#su').textContent=UN[p.unit][1];$('#su2').textContent=p.unit;sub()}
 function sub(){$('#sb').textContent=money($('#sq').value*$('#sp').value)}
-function tot(){const t=cartTotal(),cr=$('#cr').checked,pg=+$('#pg').value||0;
- $('#crb').style.display=cr?'block':'none';$('#tt').textContent=money(t);
- $('#dd').textContent=cr?'Pagó '+money(Math.min(pg,t))+' · Debe '+money(Math.max(t-pg,0)):''}
+function tot(){const t=cartTotal(),cr=$('#cr').checked,pg=+$('#pg').value||0,ds=+$('#ds').value||0,d=Math.min(t,$('#dt').value==='P'?t*Math.min(ds,100)/100:ds),n=t-d;
+ $('#crb').style.display=cr?'block':'none';$('#tt').textContent=money(n);
+ $('#dd').textContent=(d>0?'Descuento '+money(d)+' · ':'')+(cr?'Pagó '+money(Math.min(pg,n))+' · Debe '+money(Math.max(n-pg,0)):'')}
 function addCart(e){e.preventDefault();const f=new FormData(e.target),p=P(f.get('p')),n=+f.get('q'),c=+f.get('c');
  if(!p){toast('Toca un producto de la lista para elegirlo');return false}if(!n)return false;const av=sellable(p)-cartQty(p.id);
  if(n>av){toast('Solo puedes agregar '+un(av,p.unit)+' de '+p.name+' (los vencidos no cuentan)');return false}
  cart.push({pid:p.id,qty:n,price:c});vsq='';vsel='';render();return false}
-function rmCart(i){cart.splice(i,1);render()}
+function rmCart(i){const g=cart[i]&&cart[i].g;if(g)cart=cart.filter(x=>x.g!==g);else cart.splice(i,1);render()}
 function doSell(e){e.preventDefault();const f=new FormData(e.target);
  const cr=f.get('cr')==='on',cl=(f.get('cl')||'').trim(),dt=f.get('d')||today();
  if(!cart.length)return false;
  if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
  if(cr&&!cl){toast('Escribe el nombre del cliente que debe');return false}
  for(const c of cart){const p=P(c.pid);if(!p||cartQty(c.pid)>sellable(p)){toast('Ya no hay stock suficiente de '+(p?p.name:'un producto'));return false}}
- const sid=uid(),total=cartTotal();
+ const sid=uid(),gross=cartTotal(),dsv=+f.get('ds')||0,disc=Math.min(gross,f.get('dt')==='P'?gross*Math.min(dsv,100)/100:dsv),total=gross-disc,fac=gross>0?total/gross:1;
  cart.forEach(c=>{const p=P(c.pid);let need=c.qty,cost=0;const used=[];
   for(const l of p.lots.filter(l=>l.qty>0&&(!l.exp||l.exp>=today())).sort(ord)){if(!need)break;const t=Math.min(l.qty,need);l.qty-=t;need-=t;cost+=t*l.cost;used.push({id:l.id,date:l.date,exp:l.exp,cost:l.cost,qty:t})}
   p.lots=p.lots.filter(l=>l.qty>0);
-  D.moves.push(Object.assign(mv('out',p,c.qty,cost/c.qty,c.price),{date:dt,sid,lots:used}))});
+  D.moves.push(Object.assign(mv('out',p,c.qty,cost/c.qty,c.price*fac),{date:dt,sid,lots:used,combo:c.combo||''}))});
  const paid=cr?Math.min(Math.max(+f.get('pg')||0,0),total):total,debe=total-paid;
- D.sales.push({id:sid,date:dt,method:f.get('m'),paid,credit:cr&&debe>0.005,client:cl,by:myName});
+ D.sales.push({id:sid,date:dt,method:f.get('m'),paid,credit:cr&&debe>0.005,client:cl,by:myName,disc:Math.round(disc*100)/100});
  const rest=[...new Set(cart.map(c=>c.pid))].map(id=>{const q=P(id);return q?q.name+': quedan '+un(stock(q),q.unit):''}).filter(Boolean).join(' · ');
  cart=[];pd={};vsq='';vsel='';save();toast((debe>0.005?'Venta a crédito: debe '+money(debe):'Venta registrada: '+money(total))+' — Inventario descontado ('+rest+')',6000);render();return false}
 function saleForm(id){const z=S(id);if(!z)return;const ab=D.payments.filter(a=>a.mid===id);
  modal(`<h2>Venta del ${fd(z.date)}</h2>`+sLines(id).map(x=>`<div class="lot"><span>${esc(x.name)} · ${un(x.qty,x.unit||'unidad')} × ${money(x.price)}</span><b>${money(x.qty*x.price)}</b></div>`).join('')+
- `<div class="row" style="margin:8px 0"><b>Total</b><b>${money(saleTotal(id))}</b></div>
+ `<div class="row" style="margin:8px 0"><b>Total</b><b>${money(saleTotal(id))}</b></div>${z.disc>0?`<div class="mut">Incluye un descuento de ${money(z.disc)}</div>`:''}
  <div class="mut">Pagó al vender: ${money(z.paid)}${ab.length?' · Pagos posteriores: '+money(ab.reduce((t,a)=>t+a.amount,0)):''}</div>
  <div class="mut">${z.method||'Sin dato'}${z.client?' · Cliente: '+esc(z.client):''}${z.by?' · Vendió: '+esc(z.by):''}</div>`+
  (ADM()?`<h3>Corregir datos</h3><form onsubmit="return editSale(event,'${id}')">
@@ -565,6 +569,96 @@ function preHTML(){const c=+prc||0,m=+prm||0,mn=pmin(),p=P(prp);
  if(p)h+=`<div class="card mut">Precio actual de ${esc(p.name)}: <b>${money(p.price)}</b> · margen real ${p.price>0?pc1((p.price-c)/p.price*100):'—'}</div>`;
  return h}
 
+/* ---------- Combos y packs ---------- */
+let cbn='',cbi=[],cbe='',cbm='30',cbp='',cbid='';
+const cmbMax=c=>c.items.length?Math.max(0,Math.min(...c.items.map(i=>{const p=P(i.pid);return p?Math.floor((sellable(p)-cartQty(p.id))/i.qty):0}))):0;
+const cmbTxt=c=>c.items.map(i=>{const p=P(i.pid);return p?esc(p.name)+' ×'+i.qty:'(producto borrado)'}).join(', ');
+function cmbSell(){if(!D.combos.length)return'';
+ return `<div class="card"><b>Combos</b><div class="mut" style="margin-bottom:6px">Toca para agregarlos a la venta actual</div>`+
+ D.combos.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>{const k=D.products.find(p=>p.kit===c.id),kq=k?sellable(k)-cartQty(k.id):0,mx=cmbMax(c);
+  return `<div class="lot" style="align-items:flex-start"><span><b>${esc(c.name)}</b> · ${money(c.price)}<br><span class="mut">${cmbTxt(c)}</span></span>
+  <span style="display:flex;flex-direction:column;gap:6px"><button class="btn sm ${mx>0?'':'ghost'}" onclick="addComboLoose('${c.id}')">+ Armar ahora${mx>0?'':' (falta stock)'}</button>${kq>0?`<button class="btn sm ghost" onclick="addKit('${k.id}','${c.id}')">+ Ya armado (${kq})</button>`:''}</span></div>`}).join('')+`</div>`}
+function addComboLoose(cid){const c=D.combos.find(x=>x.id===cid);if(!c)return;
+ const ls2=c.items.map(it=>({p:P(it.pid),q:it.qty}));
+ if(ls2.some(x=>!x.p||sellable(x.p)-cartQty(x.p.id)<x.q)){toast('No alcanza el stock para este combo');return}
+ const reg=ls2.reduce((t,x)=>t+x.q*x.p.price,0),g=uid();let acc=0;
+ ls2.forEach((x,i)=>{const last=i===ls2.length-1,tot2=last?Math.round((c.price-acc)*100)/100:Math.round(c.price*(reg>0?x.q*x.p.price/reg:1/ls2.length)*100)/100;
+  acc+=tot2;cart.push({pid:x.p.id,qty:x.q,price:tot2/x.q,combo:c.name,g})});
+ render();toast('Combo agregado: '+c.name+' · '+money(c.price))}
+function addKit(kid,cid){const k=P(kid),c=D.combos.find(x=>x.id===cid);if(!k||!c)return;
+ if(sellable(k)-cartQty(kid)<1){toast('No quedan combos armados');return}
+ cart.push({pid:kid,qty:1,price:c.price});render();toast('Combo armado agregado: '+c.name)}
+function cmbCalc(){const its=cbi.map(i=>({p:P(i.pid),q:i.qty})).filter(x=>x.p);
+ const cost=its.reduce((t,x)=>t+x.q*x.p.cost,0)+(+cbe||0),reg=its.reduce((t,x)=>t+x.q*x.p.price,0),m=+cbm||0;
+ return{its,cost,reg,m,pm:cost*(1+m/100)}}
+function cmbRes(){const r=cmbCalc();if(!r.its.length)return'<div class="empty">Agrega productos al combo para ver los precios.</div>';
+ const mn=pmin(),pr=+cbp||0,gp=pr-r.cost,mr=pr>0?gp/pr*100:0,mrs=r.pm>0?(r.pm-r.cost)/r.pm*100:0,low=mn>0&&pr>0&&mr<mn,ah=r.reg-pr;
+ return `<div class="tk"><div class="tkl">Costo total del combo: ${money(r.cost)}</div><div class="tkp">${money(r.pm)}</div>
+  <div class="tks">Precio sugerido (+${r.m}% sobre el costo). Redondeado: <b>${money(r1(r.pm))}</b> · margen ${pc1(mrs)}</div>
+  <button class="btn" onclick="cmbUse(${r1(r.pm)})">Usar ${money(r1(r.pm))} como precio del combo</button></div>
+ <div class="card"><b>Con el precio final que pongas abajo</b>`+(pr>0?`
+  <div class="row" style="margin-top:6px"><span>Ganancia</span><b style="color:${gp>=0?'var(--ok)':'var(--bad)'}">${money(gp)}</b></div>
+  <div class="row"><span>Margen real</span><b style="color:${low?'var(--bad)':'inherit'}">${pc1(mr)}</b></div>
+  <div class="row"><span>Comprando suelto pagaría</span><b>${money(r.reg)}</b></div>
+  <div class="row"><span>La clienta ahorra</span><b>${ah>0?money(ah)+' ('+pc1(ah/r.reg*100)+')':'nada (el combo sale más caro)'}</b></div>
+  ${low?`<div class="tkw">⚠ Margen por debajo de tu mínimo (${mn}%)</div>`:''}${gp<0?'<div class="tkw">⚠ Estás vendiendo por debajo del costo</div>':''}`:'<div class="mut">Escribe el precio final del combo.</div>')+`</div>`}
+function cmbItems(){return cbi.length?cbi.map((i,n)=>{const p=P(i.pid);return `<div class="lot"><span>${esc(p?p.name:'?')} ×${i.qty}${p?' · costo '+money(p.cost*i.qty):''}</span><button class="btn sm ghost" onclick="cmbRm(${n})">Quitar</button></div>`}).join(''):'<div class="mut" style="margin-bottom:8px">Todavía no agregaste productos.</div>'}
+function cmbCalcUI(){$('#cbr').innerHTML=cmbRes();$('#cbl').innerHTML=cmbItems()}
+function cmbAdd(){const pid=$('#cbs').value,q=Math.max(1,Math.round(+$('#cbq').value)||1);if(!pid)return;
+ const e=cbi.find(i=>i.pid===pid);if(e)e.qty+=q;else cbi.push({pid,qty:q});cmbCalcUI()}
+function cmbRm(n){cbi.splice(n,1);cmbCalcUI()}
+function cmbUse(v){cbp=String(v);$('#cbp').value=cbp;cmbCalcUI()}
+function cmbReset(){cbn='';cbi=[];cbe='';cbm='30';cbp='';cbid='';render()}
+function cmbEdit(id){const c=D.combos.find(x=>x.id===id);if(!c)return;
+ cbid=id;cbn=c.name;cbi=c.items.map(i=>({pid:i.pid,qty:i.qty}));cbe=c.emp?String(c.emp):'';cbm=String(c.margin??30);cbp=String(c.price);render();window.scrollTo(0,document.body.scrollHeight)}
+function cmbSave(){const name=cbn.trim(),pr=+cbp||0;
+ if(!name){toast('Ponle un nombre al combo');return}if(!cbi.length){toast('Agrega al menos un producto');return}if(pr<=0){toast('Escribe el precio final del combo');return}
+ if(D.combos.some(c=>c.id!==cbid&&c.name.toLowerCase()===name.toLowerCase())){toast('Ya existe un combo con ese nombre');return}
+ const o={name,items:cbi.map(i=>({pid:i.pid,qty:i.qty})),emp:+cbe||0,margin:+cbm||0,price:pr};
+ let cid=cbid;if(cid)Object.assign(D.combos.find(c=>c.id===cid),o);else{cid=uid();D.combos.push(Object.assign({id:cid},o))}
+ const k=D.products.find(x=>x.kit===cid);if(k){k.price=pr;k.name=name}
+ save();toast('Combo guardado');cmbReset()}
+function cmbDel(id){const c=D.combos.find(x=>x.id===id);if(!c||!confirm('¿Eliminar el combo '+c.name+'? Los armados que tengas en stock se quedan como producto.'))return;
+ D.combos=D.combos.filter(x=>x.id!==id);save();render()}
+function vCmb(){
+ const list=D.combos.slice().sort((a,b)=>a.name.localeCompare(b.name));
+ return `<h2>Combos y packs</h2>`+
+ (list.length?list.map(c=>{const cost=c.items.reduce((t,i)=>{const p=P(i.pid);return t+(p?i.qty*p.cost:0)},0)+(+c.emp||0),k=D.products.find(p=>p.kit===c.id),mx=cmbMax(c);
+  return `<div class="card"><div class="row"><div><b>${esc(c.name)}</b><div class="mut">${cmbTxt(c)}</div></div><div style="text-align:right"><b>${money(c.price)}</b><div class="mut">costo ${money(cost)}</div></div></div>
+  <div class="mut" style="margin-top:6px">Se pueden armar ${mx} · Ya armados en stock: ${k?stock(k):0} · Margen ${c.price>0?pc1((c.price-cost)/c.price*100):'—'}</div>
+  <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn sm" onclick="asmForm('${c.id}')">Armar unidades</button><button class="btn sm ghost" onclick="cmbEdit('${c.id}')">Editar</button><button class="btn sm ghost" style="color:var(--bad)" onclick="cmbDel('${c.id}')">Eliminar</button></div></div>`}).join(''):'<div class="empty">Aún no tienes combos. Arma el primero aquí abajo.</div>')+
+ `<h3>${cbid?'Editando combo':'Armar un combo nuevo'}</h3><div class="card">
+ <label>Nombre del combo<input id="cbn" value="${esc(cbn)}" oninput="cbn=this.value" placeholder="Ej: Combo Día de la Madre"></label>
+ <label>Agregar producto<select id="cbs">${D.products.filter(p=>!p.kit).map(p=>`<option value="${p.id}">${esc(p.name)} · ${esc(p.code)}</option>`).join('')}</select></label>
+ <div class="r2"><label>Cantidad<input id="cbq" type="number" min="1" value="1"></label><button type="button" class="btn ghost" style="align-self:end;margin:0 0 10px" onclick="cmbAdd()">+ Agregar</button></div>
+ <div id="cbl">${cmbItems()}</div>
+ <label>Empaque especial del combo (S/)<input id="cbe" type="number" step="0.01" min="0" value="${cbe}" oninput="cbe=this.value;cmbCalcUI()"></label>
+ <label>Margen que buscas (%)<input id="cbm" type="number" step="1" min="0" value="${cbm}" oninput="cbm=this.value;cmbCalcUI()"></label>
+ <div class="presets">${[15,20,30,40,50].map(v=>`<button type="button" class="btn sm ghost" onclick="cbm='${v}';$('#cbm').value='${v}';cmbCalcUI()">${v}%</button>`).join('')}</div>
+ <div id="cbr">${cmbRes()}</div>
+ <label style="margin-top:10px">Precio final del combo (S/)<input id="cbp" type="number" step="0.01" min="0" value="${cbp}" oninput="cbp=this.value;cmbCalcUI()"></label>
+ <button class="btn" onclick="cmbSave()">${cbid?'Guardar cambios':'Guardar combo'}</button>${cbid||cbi.length?`<button class="btn ghost" onclick="cmbReset()">Limpiar</button>`:''}</div>`}
+function asmForm(id){const c=D.combos.find(x=>x.id===id);if(!c)return;const mx=cmbMax(c);
+ modal(`<h2>Armar ${esc(c.name)}</h2><p class="mut">Cada unidad usa: ${cmbTxt(c)}. Esos productos salen del inventario (primero los que vencen antes) y quedan como combos ya armados, listos para vender.</p>
+ <p>Con el stock actual se pueden armar hasta <b>${mx}</b>.</p>
+ <form onsubmit="return doAsm(event,'${id}')"><label>¿Cuántas unidades armas?<input name="n" type="number" min="1" max="${mx}" required></label>
+ <button class="btn" ${mx<1?'disabled':''}>Armar</button><button type="button" class="btn ghost" onclick="closeM()">Cancelar</button></form>`)}
+function doAsm(e,cid){e.preventDefault();const f=new FormData(e.target),n=Math.round(+f.get('n')),c=D.combos.find(x=>x.id===cid);
+ if(!c||!n||n<1)return false;if(n>cmbMax(c)){toast('Solo alcanza para '+cmbMax(c));return false}
+ let cost=0,minExp='';
+ c.items.forEach(it=>{const p=P(it.pid);let need=it.qty*n;
+  for(const l of p.lots.filter(l=>l.qty>0&&(!l.exp||l.exp>=today())).sort(ord)){if(!need)break;const t=Math.min(l.qty,need);l.qty-=t;need-=t;cost+=t*l.cost;if(l.exp&&(!minExp||l.exp<minExp))minExp=l.exp}
+  p.lots=p.lots.filter(l=>l.qty>0)});
+ const uc=Math.round((cost/n+(+c.emp||0))*10000)/10000;
+ if(!D.cats.includes('Combos'))D.cats.push('Combos');
+ let k=D.products.find(p=>p.kit===cid);
+ if(!k){let i=D.products.length+1,code;do{code='KIT-'+String(i++).padStart(4,'0')}while(D.products.some(p=>p.code===code));
+  k={id:uid(),code,name:c.name,cat:'Combos',unit:'set',cost:uc,cbase:uc,price:c.price,min:1,lots:[],kit:cid};D.products.push(k)}
+ k.cost=uc;k.cbase=uc;k.price=c.price;k.name=c.name;
+ k.lots.push({id:uid(),date:today(),exp:minExp,qty:n,cost:uc,cbase:uc});
+ D.moves.push(Object.assign(mv('armado',k,n,uc,0),{date:today(),note:c.name}));
+ save();closeM();render();toast('Armaste '+n+' de '+c.name+' · costo '+money(uc)+' c/u',4500);return false}
+
 /* ---------- Mermas ---------- */
 function autoMerma(){let n=0;
  D.products.forEach(p=>{const dead=p.lots.filter(l=>l.qty>0&&l.exp&&l.exp<today());
@@ -634,7 +728,7 @@ function vSum(){
  const cobT=D.sales.filter(z=>z.date>='2025-09-01').reduce((t,z)=>t+z.paid,0)+D.payments.filter(a=>a.date>='2025-09-01').reduce((t,a)=>t+a.amount,0);
  const bal=Math.round((cobT-cmp)*100)/100,pct=cmp>0?cobT/cmp*100:0;
  const inv=D.products.reduce((s,p)=>s+p.lots.reduce((a,x)=>a+x.qty*x.cost,0),0),val=D.products.reduce((s,p)=>s+stock(p)*p.price,0);
- const lab={in:'Entrada',out:'Venta',merma:'Merma',ajuste:'Ajuste de stock'};
+ const lab={in:'Entrada',out:'Venta',merma:'Merma',ajuste:'Ajuste de stock',armado:'Armado de combo'};
  return `<h2>Resumen</h2>
  <select onchange="range=this.value;render()" style="margin:0 0 10px">${monthOpts()}</select>
  <div class="grid">
@@ -672,13 +766,13 @@ function render(keepFocus){
  if(!ready)return;
  const nm=autoMerma();if(nm)toast(nm+(nm==1?' lote vencido pasó':' lotes vencidos pasaron')+' a Mermas');
  const a=alerts(),n=a.v.length+a.s.length,nd=debts().length;
- const ALL=[['productos','Productos'],['inventario','Inventario'],['precios','Precios'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
+ const ALL=[['productos','Productos'],['inventario','Inventario'],['precios','Precios'],['combos','Combos'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
  if(isOwner)ALL.push(['equipo','Equipo']);
  const OKV=['vender','ventas','deudas','productos','inventario','alertas'];
  const T=ADM()?ALL:OKV.map(k=>ALL.find(x=>x[0]===k));
  if(!T.some(x=>x[0]===tab))tab=T[0][0];
  $('#nav').innerHTML=T.map(([k,t])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${t}</button>`).join('');
- $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu,inventario:vInv,precios:vPre}[tab]();
+ $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu,inventario:vInv,precios:vPre,combos:vCmb}[tab]();
  if(keepFocus){const s=$('#s');if(s){s.focus();s.setSelectionRange(q.length,q.length)}}
 }
 window.addEventListener('fbready',boot);
