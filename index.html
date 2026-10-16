@@ -41,6 +41,14 @@ nav button.on{color:var(--rose);font-weight:700;box-shadow:inset 0 3px 0 var(--r
 .pk{padding:10px;border-bottom:1px solid var(--line)}
 .pk:last-child{border-bottom:0}
 .pk.sel{background:#f9e3ea;box-shadow:inset 4px 0 0 var(--rose)}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.tk{background:var(--pl);color:#fbf3f0;border-radius:14px;padding:16px;margin-bottom:12px}
+.tkl{font-size:13px;color:#ebd3d6}
+.tkp{font:700 32px Georgia,serif;margin:4px 0}
+.tks{font-size:14px;color:#ebd3d6;background:rgba(251,243,240,.1);border-radius:8px;padding:8px 10px;margin-bottom:10px}
+.tkb{display:flex;justify-content:space-between;border-top:1px dashed rgba(251,243,240,.3);padding-top:10px;font-size:13px;color:rgba(251,243,240,.7)}
+.tkb b{display:block;color:#fbf3f0;font-size:15px}
+.tkw{background:#7a1f1f;border-radius:8px;padding:8px 10px;margin-top:10px;font-size:13px}
 </style></head><body>
 <header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span><span id="stt" onclick="retrySave()" style="float:right;font-size:13px;color:#e9c9d6;cursor:pointer"></span></header>
 <main id="v"></main>
@@ -150,6 +158,8 @@ async function exportXlsx(){
  add('Pagos de deudas',D.payments.map(a=>{const z=S(a.mid);return{Fecha:a.date,Cliente:z?z.client:'',Monto:a.amount,'Forma de pago':a.method}}));
  add('Entradas',D.moves.filter(x=>x.type==='in').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost})));
  add('Mermas',D.moves.filter(x=>x.type==='merma').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost,'Pérdida':x.qty*x.cost,Motivo:x.reason||'Vencido',Nota:x.note||''})));
+ add('Inventario',D.products.map(p=>({'Código':p.code,Producto:p.name,'Categoría':p.cat,'Presentación':p.unit,Stock:stock(p),'Avisar si quedan ≤':p.min,'Costo total en stock':invVal(p),'Precio de venta':p.price,'Valor a precio de venta':stock(p)*p.price,'Vence primero':nextExp(p)})));
+ add('Ajustes de stock',D.moves.filter(x=>x.type==='ajuste').map(x=>({Fecha:x.date,Producto:x.name,Diferencia:x.qty,Costo:x.cost,Motivo:x.reason||'',Nota:x.note||'','Quién':x.by||''})));
  XLSX.writeFile(W,'salyn-pos-'+today()+'.xlsx')}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'S/ '+(+n||0).toFixed(2);
@@ -232,31 +242,51 @@ function savP(e,id){e.preventDefault();const f=new FormData(e.target),code=f.get
  if(D.products.some(x=>x.id!==id&&x.code.toLowerCase()===code.toLowerCase())){toast('Ese código ya lo tiene otro producto');return false}
  if(f.get('c')==='__new'){toast('Elige una categoría');return false}
  const o={name:f.get('n').trim(),code,unit:f.get('u'),cat:f.get('c'),cost:+f.get('co'),price:+f.get('pr'),min:+f.get('mn')};
- if(id)Object.assign(P(id),o);
+ if(id){const q0=P(id);if(q0.cost!==o.cost){delete q0.cbase;delete q0.emp}Object.assign(q0,o)}
  else{o.id=uid();o.lots=[];const n=+f.get('st')||0;
-  if(n)o.lots.push({id:uid(),date:f.get('de')||today(),exp:f.get('ex'),qty:n,cost:o.cost});
+  if(n)o.lots.push({id:uid(),date:f.get('de')||today(),exp:f.get('ex'),qty:n,cost:o.cost,cbase:o.cost});
   D.products.push(o);if(n)D.moves.push(Object.assign(mv('in',o,n,o.cost,o.price),{date:f.get('de')||today()}))}
  save();closeM();render();toast('Producto guardado');return false}
 function delLot(pid,lid){if(!confirm('¿Quitar este lote del inventario? (No cuenta como venta ni pérdida)'))return;
  const p=P(pid);p.lots=p.lots.filter(l=>l.id!==lid);save();pForm(pid);render()}
 function delP(id){if(confirm('¿Eliminar este producto? El historial se mantiene.')){D.products=D.products.filter(x=>x.id!==id);save();closeM();render()}}
 
-/* ---------- Entrada (crea un lote nuevo) ---------- */
+/* ---------- Entrada (crea un lote nuevo, con costo real) ---------- */
+let etd={ta:'',pa:'',en:''};
+const EMP=[0,0.3,0.5,0.8,1.2,1.8];
+const costoReal=(base,emp,pa,en,ta)=>{const t=Math.max(1,Math.round(+ta)||1);return Math.round(((+base||0)+(+emp||0)+((+pa||0)+(+en||0))/t)*10000)/10000};
 function vIn(){
   if(!D.products.length)return `<h2>Entrada de mercadería</h2><div class="empty">Primero crea un producto en la pestaña Productos.</div>`;
-  const p=D.products[0];
+  const p=D.products[0],base=p.cbase??p.cost;
   return `<h2>Entrada de mercadería</h2><div class="card"><form onsubmit="return doIn(event)">
   <label>Producto<select name="p" onchange="fillIn(this.value)">${opts(D.products,stock)}</select></label>
   <div class="r2"><label>Cantidad (<span id="iu">${UN[p.unit][1]}</span>)<input name="q" type="number" min="1" required></label>
-  <label>Costo (S/) por <span id="ic2">${p.unit}</span><input name="c" id="ic" type="number" step="0.01" min="0" required value="${p.cost}"></label></div>
+  <label>Costo del producto (S/) por <span id="ic2">${p.unit}</span><input name="c" id="ic" type="number" step="0.01" min="0" required value="${Math.round(base*100)/100}" oninput="inCalc()"></label></div>
+  <label>Empaque por unidad (S/)<input name="em" id="iem" type="number" step="0.01" min="0" value="${p.emp||0}" oninput="inCalc()"></label>
+  <div class="presets">${EMP.map(v=>`<button type="button" class="btn sm ghost" onclick="$('#iem').value=${v};inCalc()">${v?'S/ '+v.toFixed(2):'Sin empaque'}</button>`).join('')}</div>
+  <h3>Traslado de la tanda (opcional)</h3>
+  <p class="mut" style="margin-top:-4px">Pasaje y envío son de todo el viaje. Se reparten entre todas las unidades de la tanda, no solo las de este producto.</p>
+  <div class="r2"><label>Unidades en toda la tanda<input name="ta" id="ita" type="number" min="1" value="${etd.ta}" oninput="inCalc()"></label>
+  <label>Pasaje total (S/)<input name="pa" id="ipa" type="number" step="0.01" min="0" value="${etd.pa}" oninput="inCalc()"></label></div>
+  <label>Envío Shalom total (S/)<input name="en" id="ien" type="number" step="0.01" min="0" value="${etd.en}" oninput="inCalc()"></label>
+  <div class="card" style="background:#f9eef1"><div class="mut">Costo real por <span id="ic3">${p.unit}</span></div><div class="big" id="icr">${money(costoReal(base,p.emp||0,etd.pa,etd.en,etd.ta))}</div><div class="mut" id="icd"></div></div>
   <div class="r2"><label>Fecha de entrega<input name="d" type="date" min="2025-09-01" max="${today()}" required value="${today()}"></label>
   <label>Fecha de vencimiento<input name="x" type="date"></label></div>
-  <button class="btn">Registrar lote</button></form></div>
-  <p class="mut">Cada entrada crea un lote nuevo con su propia fecha de entrega y vencimiento.</p>`}
-function fillIn(id){const p=P(id);$('#ic').value=p.cost;$('#iu').textContent=UN[p.unit][1];$('#ic2').textContent=p.unit}
-function doIn(e){e.preventDefault();const f=new FormData(e.target),p=P(f.get('p')),n=+f.get('q'),c=+f.get('c');
- if(!p||!n)return false;p.lots.push({id:uid(),date:f.get('d'),exp:f.get('x'),qty:n,cost:c});p.cost=c;
- D.moves.push(Object.assign(mv('in',p,n,c,p.price),{date:f.get('d')}));save();toast('Lote registrado: +'+un(n,p.unit)+' de '+p.name);render();return false}
+  <button class="btn">Registrar lote</button>
+  <button type="button" class="btn ghost" onclick="etd={ta:'',pa:'',en:''};render()">Nueva tanda (borrar pasaje y envío)</button></form></div>
+  <p class="mut">Cada entrada crea un lote con su propio costo real. Si compraste varios productos en el mismo viaje, repite el mismo pasaje, envío y unidades de la tanda en cada uno: la app los recuerda para ti.</p>`}
+function inCalc(){const v=id=>$(id).value,pa=+v('#ipa')||0,en=+v('#ien')||0,ta=+v('#ita')||0,t=Math.max(1,Math.round(ta)||1);
+ $('#icr').textContent=money(costoReal(v('#ic'),v('#iem'),pa,en,ta));
+ $('#icd').textContent=(pa+en)>0&&ta<1?'⚠ Escribe cuántas unidades tiene la tanda':'Producto '+money(+v('#ic')||0)+' + empaque '+money(+v('#iem')||0)+' + pasaje y envío '+money((pa+en)/t)}
+function fillIn(id){const p=P(id);$('#ic').value=Math.round((p.cbase??p.cost)*100)/100;$('#iem').value=p.emp||0;$('#iu').textContent=UN[p.unit][1];$('#ic2').textContent=p.unit;$('#ic3').textContent=p.unit;inCalc()}
+function doIn(e){e.preventDefault();const f=new FormData(e.target),p=P(f.get('p')),n=+f.get('q'),base=+f.get('c')||0,em=+f.get('em')||0,pa=+f.get('pa')||0,en=+f.get('en')||0,ta=Math.round(+f.get('ta'))||0;
+ if(!p||!n)return false;
+ if((pa+en)>0&&ta<1){toast('Escribe cuántas unidades tiene la tanda para repartir el pasaje y el envío');return false}
+ const c=costoReal(base,em,pa,en,ta||1);
+ p.lots.push({id:uid(),date:f.get('d'),exp:f.get('x'),qty:n,cost:c,cbase:base,emp:em,extra:Math.round((pa+en)/(ta||1)*10000)/10000});
+ p.cost=c;p.cbase=base;p.emp=em;etd={ta:ta?String(ta):'',pa:pa?String(pa):'',en:en?String(en):''};
+ D.moves.push(Object.assign(mv('in',p,n,c,p.price),{date:f.get('d')}));
+ save();toast('Lote registrado: +'+un(n,p.unit)+' de '+p.name+' · costo real '+money(c)+' c/u',4500);render();return false}
 
 /* ---------- Vender (varios productos; sale primero el lote que vence antes) ---------- */
 const S=id=>D.sales.find(x=>x.id===id);
@@ -436,6 +466,105 @@ function roleToggle(em){const m=TEAM[em];if(!m)return;FB.write([{col:'team',id:e
 function resetPw(em){FB.reset(em).then(()=>toast('Le enviamos un correo para cambiar su contraseña',4000)).catch(e=>toast(authMsg(e)))}
 function delMember(em){if(!confirm('¿Quitar el acceso a '+em+'? Ya no podrá ver ni guardar datos.'))return;FB.write([{col:'team',id:em,del:true}]).catch(e=>toast('No se pudo quitar: '+(e.code||'')))}
 
+/* ---------- Inventario (stock) ---------- */
+let iq='',ic='',ie='',iso='nombre';
+const AJ=['Conteo físico','Error de registro','Pérdida o robo','Otro'];
+const pMin=p=>p.min??3;
+const invVal=p=>p.lots.reduce((t,l)=>t+l.qty*l.cost,0);
+function invEstado(p){const q=stock(p);return q===0?'cero':q<=pMin(p)?'bajo':st(p)==='pronto'?'vencer':'ok'}
+function invList(){const q=iq.toLowerCase();
+ const l=D.products.filter(p=>(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q))&&(!ic||p.cat===ic)&&
+  (!ie||(ie==='cero'?stock(p)===0:ie==='bajo'?(stock(p)>0&&stock(p)<=pMin(p)):st(p)==='pronto')));
+ const ex=p=>nextExp(p)||'9999';
+ const k={nombre:(a,b)=>a.name.localeCompare(b.name),stock:(a,b)=>stock(a)-stock(b)||a.name.localeCompare(b.name),valor:(a,b)=>invVal(b)-invVal(a),vence:(a,b)=>ex(a)<ex(b)?-1:ex(a)>ex(b)?1:0};
+ return l.sort(k[iso]||k.nombre)}
+function invCard(p){const e=invEstado(p),q=stock(p);
+ const pill=e==='cero'?['vencido','Sin stock']:e==='bajo'?['pronto','Stock bajo']:e==='vencer'?['pronto','Por vencer']:['ok','Bien'];
+ return `<div class="card" onclick="invForm('${p.id}')"><div class="row"><div><b>${esc(p.name)}</b> <span class="code">${esc(p.code)}</span><div class="mut">${esc(p.cat)}</div></div>
+ <div style="text-align:right"><div class="big">${un(q,p.unit)}</div><span class="pill ${pill[0]}">${pill[1]}</span></div></div>
+ <div class="mut" style="margin-top:6px">${nextExp(p)?'Vence primero: '+fd(nextExp(p))+' · ':''}${p.lots.length} lote${p.lots.length==1?'':'s'}${ADM()?' · Costo '+money(invVal(p))+' · Venta '+money(q*p.price):''}</div></div>`}
+function invBody(){const l=invList();
+ const cero=l.filter(p=>stock(p)===0).length,bajo=l.filter(p=>stock(p)>0&&stock(p)<=pMin(p)).length,venc=l.filter(p=>st(p)==='pronto').length;
+ const cost=l.reduce((t,p)=>t+invVal(p),0),val=l.reduce((t,p)=>t+stock(p)*p.price,0);
+ return `<div class="grid"><div class="card"><div class="mut">Productos</div><div class="big">${l.length}</div></div>
+ <div class="card"><div class="mut">Sin stock</div><div class="big" style="color:var(--bad)">${cero}</div></div>
+ <div class="card"><div class="mut">Stock bajo</div><div class="big" style="color:var(--warn)">${bajo}</div></div>
+ <div class="card"><div class="mut">Por vencer (30 días)</div><div class="big" style="color:var(--warn)">${venc}</div></div>
+ ${ADM()?`<div class="card"><div class="mut">Invertido en stock (a costo)</div><div class="big">${money(cost)}</div></div>
+ <div class="card"><div class="mut">Valor a precio de venta</div><div class="big" style="color:var(--ok)">${money(val)}</div></div>`:''}</div>`+
+ (l.length?l.map(invCard).join(''):'<div class="empty">No hay productos con estos filtros.</div>')}
+function vInv(){return `<h2>Inventario</h2>
+ <input id="iqs" placeholder="Buscar por nombre o código" value="${esc(iq)}" oninput="iq=this.value;$('#ib').innerHTML=invBody()" autocomplete="off" style="margin-bottom:10px">
+ <div class="r2" style="margin-bottom:10px"><select onchange="ic=this.value;$('#ib').innerHTML=invBody()" style="margin:0"><option value="">Todas las categorías</option>${D.cats.map(c=>`<option ${c===ic?'selected':''}>${esc(c)}</option>`).join('')}</select>
+ <select onchange="ie=this.value;$('#ib').innerHTML=invBody()" style="margin:0"><option value="">Todos</option><option value="cero" ${ie==='cero'?'selected':''}>Sin stock</option><option value="bajo" ${ie==='bajo'?'selected':''}>Stock bajo</option><option value="vencer" ${ie==='vencer'?'selected':''}>Por vencer (30 días)</option></select></div>
+ <select onchange="iso=this.value;$('#ib').innerHTML=invBody()" style="margin:0 0 10px"><option value="nombre" ${iso==='nombre'?'selected':''}>Ordenar: nombre A-Z</option><option value="stock" ${iso==='stock'?'selected':''}>Ordenar: menos stock primero</option><option value="vence" ${iso==='vence'?'selected':''}>Ordenar: vence primero</option>${ADM()?`<option value="valor" ${iso==='valor'?'selected':''}>Ordenar: más dinero invertido</option>`:''}</select>
+ <div id="ib">${invBody()}</div><p class="mut">Toca un producto para ver sus lotes${ADM()?' y ajustar el stock con un conteo físico':''}.</p>`}
+function invForm(id){const p=P(id);if(!p)return;const aj=D.moves.filter(x=>x.type==='ajuste'&&x.pid===id).slice(-5).reverse();
+ modal(`<h2>${esc(p.name)}</h2><div class="mut"><span class="code">${esc(p.code)}</span> · ${esc(p.cat)} · Stock total ${un(stock(p),p.unit)}</div>
+ <h3>Lotes</h3>`+(p.lots.length?p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}${ADM()?' · costo '+money(x.cost)+(x.cbase!=null&&x.cost-x.cbase>0.004?' (producto '+money(x.cbase)+' + extras '+money(x.cost-x.cbase)+')':''):''}</span><span class="pill ${ls(x)}">${ls(x)==='pronto'?'Por vencer':'Bien'}</span></div>`).join(''):'<div class="mut">Sin lotes: no hay stock.</div>')+
+ (ADM()?`<h3>Ajustar stock (conteo físico)</h3>`+(p.lots.length?`<form onsubmit="return doAjuste(event,'${id}')">
+ <label>Lote<select name="l">${lotOpts(p)}</select></label>
+ <div class="r2"><label>Cantidad real que contaste<input name="q" type="number" min="0" required></label>
+ <label>Motivo<select name="r">${AJ.map(r=>`<option>${r}</option>`).join('')}</select></label></div>
+ <label>Fecha<input name="d" type="date" min="2025-09-01" max="${today()}" value="${today()}" required></label>
+ <label>Nota (opcional)<input name="t"></label>
+ <button class="btn">Guardar conteo</button></form>
+ <p class="mut">Pon la cantidad que realmente hay en el estante para ese lote. La app calcula la diferencia. Si falta, se anota como pérdida.</p>`:'<div class="mut">Para agregar unidades, registra una entrada.</div>')+
+ (aj.length?`<h3>Ajustes recientes</h3>`+aj.map(x=>`<div class="lot"><span>${fd(x.date)} · ${esc(x.reason||'')}${x.note?' · '+esc(x.note):''}</span><b>${x.qty>0?'+':''}${x.qty}</b></div>`).join(''):''):'')+
+ `<button class="btn ghost" style="margin-top:12px" onclick="closeM()">Cerrar</button>`)}
+function doAjuste(e,pid){e.preventDefault();const f=new FormData(e.target),p=P(pid),l=p&&p.lots.find(x=>x.id===f.get('l')),real=+f.get('q'),dt=f.get('d')||today();
+ if(!l||isNaN(real)||real<0)return false;
+ if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
+ const diff=real-l.qty;if(diff===0){toast('El conteo coincide con la app: no hay cambios');return false}
+ const lot={date:l.date,exp:l.exp,cost:l.cost};l.qty=real;p.lots=p.lots.filter(x=>x.qty>0);
+ D.moves.push(Object.assign(mv('ajuste',p,diff,lot.cost,0),{date:dt,reason:f.get('r'),note:(f.get('t')||'').trim(),lotDate:lot.date,exp:lot.exp,by:myName}));
+ save();closeM();render();toast('Stock ajustado: '+p.name+' ahora tiene '+un(stock(p),p.unit),4000);return false}
+
+/* ---------- Precios (calculadora) ---------- */
+let prp='',prc='',prm='40',pcp='';
+const PMIN='salynMargenMinimo';
+const pmin=()=>{try{return +localStorage.getItem(PMIN)||0}catch(e){return 0}};
+const r1=v=>Math.round(v*10)/10;
+const pc1=v=>(+v).toFixed(1)+'%';
+function vPre(){const p=P(prp);
+ return `<h2>Calculadora de precios</h2><div class="card">
+ <label>Producto<select id="prp" onchange="preSel(this.value)"><option value="">Otro (escribo el costo)</option>${D.products.map(x=>`<option value="${x.id}" ${x.id===prp?'selected':''}>${esc(x.name)} · ${esc(x.code)}</option>`).join('')}</select></label>
+ <label>Costo total por unidad (S/)<input id="prc" type="number" step="0.01" min="0" value="${prc}" oninput="prc=this.value;preCalc()"></label>
+ <div class="mut" id="prh" style="margin:-4px 0 10px">${p?'Es el costo real de tu último lote: producto + empaque + pasaje + envío.':''}</div>
+ <label>Margen que buscas (%)<input id="prm" type="number" step="1" min="0" value="${prm}" oninput="prm=this.value;preCalc()"></label>
+ <div class="presets">${[20,30,40,50,60,80].map(v=>`<button type="button" class="btn sm ghost" onclick="preM(${v})">${v}%</button>`).join('')}</div>
+ <label>Margen mínimo (%): te aviso en rojo si baja de aquí<input id="prx" type="number" step="1" min="0" placeholder="Ej. 25" value="${pmin()||''}" oninput="try{localStorage.setItem(PMIN,this.value)}catch(e){};preCalc()"></label>
+ <label>Precio de la competencia (opcional)<input id="pcp" type="number" step="0.01" min="0" value="${pcp}" oninput="pcp=this.value;preCalc()"></label></div>
+ <div id="pre">${preHTML()}</div>`}
+function preSel(id){prp=id;const p=P(id);
+ if(p){prc=String(Math.round(p.cost*100)/100);$('#prc').value=prc;$('#prh').textContent='Es el costo real de tu último lote: producto + empaque + pasaje + envío.'}else $('#prh').textContent='';
+ preCalc()}
+function preM(v){prm=String(v);$('#prm').value=prm;preCalc()}
+function preCalc(){$('#pre').innerHTML=preHTML()}
+function preUse(v){const p=P(prp);if(!p){toast('Primero elige un producto arriba');return}
+ p.price=v;save();toast('Precio de '+p.name+' actualizado a '+money(v));preCalc()}
+function preHTML(){const c=+prc||0,m=+prm||0,mn=pmin(),p=P(prp);
+ if(c<=0)return '<div class="empty">Elige un producto o escribe el costo para ver los precios.</div>';
+ const pm=c*(1+m/100),gm=pm-c,mr=pm>0?gm/pm*100:0,low=mn>0&&mr<mn;
+ const use=v=>p?`<button class="btn" style="margin-top:10px" onclick="preUse(${v})">Usar ${money(v)} para ${esc(p.name)}</button>`:'';
+ let h=`<div class="tk"><div class="tkl">Sumando ${m}% al costo (markup)</div><div class="tkp">${money(pm)}</div>
+  <div class="tks">Redondeado a S/ 0.10: <b>${money(r1(pm))}</b></div>
+  <div class="tkb"><div>Ganancia<b>${money(gm)}</b></div><div>Margen real<b style="color:${low?'#ff9d9d':'inherit'}">${pc1(mr)}</b></div></div>
+  ${low?`<div class="tkw">⚠ Tu margen real (${pc1(mr)}) está por debajo de tu mínimo (${mn}%)</div>`:''}${use(r1(pm))}</div>`;
+ if(m<100){const pg=c/(1-m/100),gg=pg-c,mk=gg/c*100;
+  h+=`<div class="tk"><div class="tkl">El ${m}% es lo que queda del precio (margen)</div><div class="tkp">${money(pg)}</div>
+  <div class="tks">Redondeado a S/ 0.10: <b>${money(r1(pg))}</b></div>
+  <div class="tkb"><div>Ganancia<b>${money(gg)}</b></div><div>Sobre el costo<b>${pc1(mk)}</b></div></div>${use(r1(pg))}</div>`}
+ else h+=`<div class="card mut">El método por margen no aplica a 100% o más.</div>`;
+ h+=`<div class="card"><b>Escenarios</b><div class="mut" style="margin-bottom:8px">Mismo costo, tres márgenes (sobre el costo)</div><div class="grid" style="grid-template-columns:repeat(3,1fr)">`+
+  [['Conservador',Math.max(0,m-10)],['Estándar',m],['Agresivo',m+10]].map(([n,x])=>{const q=c*(1+x/100);
+   return `<div class="card" style="margin:0;text-align:center"><div class="mut">${n}</div><b>${x}%</b><div class="big" style="font-size:17px">${money(q)}</div><div class="mut">gana ${money(q-c)}</div></div>`}).join('')+`</div></div>`;
+ const cp=+pcp||0;
+ if(cp>0){const d=r1(pm)-cp,ad=Math.abs(d),pp=ad/cp*100;
+  h+=`<div class="card"><b>Frente a la competencia</b><div style="margin-top:6px">${ad<0.05?'Estás igual que la competencia.':d>0?`Estás <b>${money(ad)} más caro</b> (${pc1(pp)} por encima de ${money(cp)}).`:`Estás <b>${money(ad)} más barato</b> (${pc1(pp)} por debajo de ${money(cp)}): hay espacio para subir el precio.`}</div></div>`}
+ if(p)h+=`<div class="card mut">Precio actual de ${esc(p.name)}: <b>${money(p.price)}</b> · margen real ${p.price>0?pc1((p.price-c)/p.price*100):'—'}</div>`;
+ return h}
+
 /* ---------- Mermas ---------- */
 function autoMerma(){let n=0;
  D.products.forEach(p=>{const dead=p.lots.filter(l=>l.qty>0&&l.exp&&l.exp<today());
@@ -495,7 +624,7 @@ function baja(pid,lid){const p=P(pid),l=p.lots.find(x=>x.id===lid);
 function vSum(){
  const l=D.moves.filter(inRange);
  let sold=0,gain=0,buy=0,loss=0;
- l.forEach(x=>{if(x.type==='out'){sold+=x.qty*x.price;gain+=x.qty*(x.price-x.cost)}else if(x.type==='in')buy+=x.qty*x.cost;else loss+=x.qty*x.cost});
+ l.forEach(x=>{if(x.type==='out'){sold+=x.qty*x.price;gain+=x.qty*(x.price-x.cost)}else if(x.type==='in')buy+=x.qty*x.cost;else if(x.type==='merma')loss+=x.qty*x.cost;else if(x.type==='ajuste'&&x.qty<0)loss+=-x.qty*x.cost});
  const pay={Efectivo:0,Yape:0,Transferencia:0};
  D.sales.filter(inRange).forEach(z=>{const k=z.method||'Sin dato';pay[k]=(pay[k]||0)+z.paid});
  D.payments.filter(a=>range==='todo'?a.date>='2025-09-01':a.date.slice(0,7)===range).forEach(a=>{pay[a.method]=(pay[a.method]||0)+a.amount});
@@ -505,14 +634,14 @@ function vSum(){
  const cobT=D.sales.filter(z=>z.date>='2025-09-01').reduce((t,z)=>t+z.paid,0)+D.payments.filter(a=>a.date>='2025-09-01').reduce((t,a)=>t+a.amount,0);
  const bal=Math.round((cobT-cmp)*100)/100,pct=cmp>0?cobT/cmp*100:0;
  const inv=D.products.reduce((s,p)=>s+p.lots.reduce((a,x)=>a+x.qty*x.cost,0),0),val=D.products.reduce((s,p)=>s+stock(p)*p.price,0);
- const lab={in:'Entrada',out:'Venta',merma:'Merma'};
+ const lab={in:'Entrada',out:'Venta',merma:'Merma',ajuste:'Ajuste de stock'};
  return `<h2>Resumen</h2>
  <select onchange="range=this.value;render()" style="margin:0 0 10px">${monthOpts()}</select>
  <div class="grid">
  <div class="card"><div class="mut">Vendido</div><div class="big">${money(sold)}</div></div>
  <div class="card"><div class="mut">Ganancia</div><div class="big" style="color:var(--ok)">${money(gain)}</div></div>
  <div class="card"><div class="mut">Compras</div><div class="big">${money(buy)}</div></div>
- <div class="card"><div class="mut">Pérdida por mermas</div><div class="big" style="color:var(--bad)">${money(loss)}</div></div></div>
+ <div class="card"><div class="mut">Pérdida (mermas y faltantes)</div><div class="big" style="color:var(--bad)">${money(loss)}</div></div></div>
  <div class="card"><div class="mut">Cobrado en este período</div><div class="big">${money(cobrado)}</div>${Object.entries(pay).filter(([k,v])=>k!=='Sin dato'||v>0).map(([k,v])=>`<div class="row mut"><span>${k}</span><b>${money(v)}</b></div>`).join('')}</div>
  <div class="card"><div class="mut">Por cobrar (fiados pendientes, a hoy)</div><div class="big" style="color:var(--warn)">${money(porCobrar)}</div></div>
  ${Object.keys(byV).length>1?`<div class="card"><b>Ventas por persona</b><div class="mut">Del período elegido</div>${Object.entries(byV).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="row" style="margin-top:6px"><span>${esc(k)}</span><b>${money(v)}</b></div>`).join('')}</div>`:''}
@@ -543,13 +672,13 @@ function render(keepFocus){
  if(!ready)return;
  const nm=autoMerma();if(nm)toast(nm+(nm==1?' lote vencido pasó':' lotes vencidos pasaron')+' a Mermas');
  const a=alerts(),n=a.v.length+a.s.length,nd=debts().length;
- const ALL=[['productos','Productos'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
+ const ALL=[['productos','Productos'],['inventario','Inventario'],['precios','Precios'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
  if(isOwner)ALL.push(['equipo','Equipo']);
- const OKV=['vender','ventas','deudas','productos','alertas'];
+ const OKV=['vender','ventas','deudas','productos','inventario','alertas'];
  const T=ADM()?ALL:OKV.map(k=>ALL.find(x=>x[0]===k));
  if(!T.some(x=>x[0]===tab))tab=T[0][0];
  $('#nav').innerHTML=T.map(([k,t])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${t}</button>`).join('');
- $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu}[tab]();
+ $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu,inventario:vInv,precios:vPre}[tab]();
  if(keepFocus){const s=$('#s');if(s){s.focus();s.setSelectionRange(q.length,q.length)}}
 }
 window.addEventListener('fbready',boot);
