@@ -49,6 +49,10 @@ nav button.on{color:var(--rose);font-weight:700;box-shadow:inset 0 3px 0 var(--r
 .tkb{display:flex;justify-content:space-between;border-top:1px dashed rgba(251,243,240,.3);padding-top:10px;font-size:13px;color:rgba(251,243,240,.7)}
 .tkb b{display:block;color:#fbf3f0;font-size:15px}
 .tkw{color:#fff;background:#7a1f1f;border-radius:8px;padding:8px 10px;margin-top:10px;font-size:13px}
+.ord{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:10px}
+.ord summary{padding:12px;cursor:pointer;list-style:none}
+.ord summary::-webkit-details-marker{display:none}
+.ordb{padding:0 12px 12px;border-top:1px dashed var(--line)}
 </style></head><body>
 <header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span><span id="stt" onclick="retrySave()" style="float:right;font-size:13px;color:#e9c9d6;cursor:pointer"></span></header>
 <main id="v"></main>
@@ -156,7 +160,7 @@ async function exportXlsx(){
  add('Lotes',D.products.flatMap(p=>p.lots.map(l=>({'Código':p.code,Producto:p.name,Cantidad:l.qty,'Costo por unidad':l.cost,'Fecha entrega':l.date,Vencimiento:l.exp}))));
  add('Ventas',D.sales.map(z=>({Fecha:z.date,Cliente:z.client,'Forma de pago':z.method||'Sin dato',Productos:sLines(z.id).map(x=>x.name+' ×'+x.qty).join(', '),Total:saleTotal(z.id),'Pagó al vender':z.paid,'A crédito':z.credit?'Sí':'No'})));
  add('Detalle ventas',D.moves.filter(x=>x.type==='out').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Precio:x.price,Costo:x.cost,Combo:x.combo||'',Ganancia:x.qty*(x.price-x.cost)})));
- add('Pagos de deudas',D.payments.map(a=>{const z=S(a.mid);return{Fecha:a.date,Cliente:z?z.client:'',Monto:a.amount,'Forma de pago':a.method}}));
+ add('Pagos de deudas',D.payments.map(a=>{const z=S(a.mid);return{Fecha:a.date,Cliente:z?z.client:'',Monto:a.amount,'Forma de pago':a.method,Nota:a.note||''}}));
  add('Entradas',D.moves.filter(x=>x.type==='in').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost})));
  add('Mermas',D.moves.filter(x=>x.type==='merma').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost,'Pérdida':x.qty*x.cost,Motivo:x.reason||'Vencido',Nota:x.note||''})));
  add('Inventario',D.products.map(p=>({'Código':p.code,Producto:p.name,'Categoría':p.cat,'Presentación':p.unit,Stock:stock(p),'Avisar si quedan ≤':p.min,'Costo total en stock':invVal(p),'Precio de venta':p.price,'Valor a precio de venta':stock(p)*p.price,'Vence primero':nextExp(p)})));
@@ -368,14 +372,20 @@ function saleForm(id){const z=S(id);if(!z)return;const ab=D.payments.filter(a=>a
  <div class="r2"><label>Fecha<input name="d" type="date" min="2025-09-01" max="${today()}" value="${z.date}" required></label>
  <label>Forma de pago<select name="m">${METHODS.map(m=>`<option ${m===z.method?'selected':''}>${m}</option>`).join('')}</select></label></div>
  <label>Cliente<input name="cl" value="${esc(z.client||'')}" placeholder="Nombre (obligatorio si es fiado)"></label>
+ <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:16px"><input type="checkbox" name="cr" ${z.credit?'checked':''} style="width:auto;margin:0"> Venta a crédito (fiado)</label>
+ <label>Pagó al vender (S/)<input name="pg" type="number" step="0.01" min="0" value="${Math.round(z.paid*100)/100}"></label>
  <button class="btn">Guardar cambios</button></form>
  <button class="btn ghost" style="color:var(--bad)" onclick="voidSale('${id}')">Anular venta</button>`:'')+
  `<button class="btn ghost" onclick="closeM()">Cerrar</button>`+
  (ADM()?`<p class="mut">Si te equivocaste de producto, cantidad o precio: anula la venta (el stock vuelve a su lote) y regístrala de nuevo.</p>`:'<p class="mut">Si hay un error en esta venta, avísale a la dueña para corregirla.</p>'))}
-function editSale(e,id){e.preventDefault();const f=new FormData(e.target),z=S(id),dt=f.get('d'),cl=(f.get('cl')||'').trim();
+function editSale(e,id){e.preventDefault();const f=new FormData(e.target),z=S(id),dt=f.get('d'),cl=(f.get('cl')||'').trim(),cr=f.get('cr')==='on',tot=saleTotal(id);
  if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
- if(z.credit&&!cl){toast('Escribe el nombre del cliente que debe');return false}
- z.date=dt;z.method=f.get('m');z.client=cl;sLines(id).forEach(x=>x.date=dt);save();closeM();render();toast('Venta corregida');return false}
+ if(cr&&!cl){toast('Escribe el nombre del cliente que debe');return false}
+ const pg=Math.min(Math.max(+f.get('pg')||0,0),tot),ab=D.payments.filter(a=>a.mid===id).length;
+ if(!cr&&z.credit&&ab&&!confirm('Al quitar el crédito se borran '+ab+' pago(s) de deuda de esta venta. ¿Continuar?'))return false;
+ z.date=dt;z.method=f.get('m');z.client=cl;
+ if(cr){z.credit=pg<tot-0.005;z.paid=pg}else{z.credit=false;z.paid=tot;D.payments=D.payments.filter(a=>a.mid!==id)}
+ sLines(id).forEach(x=>x.date=dt);save();closeM();render();toast('Venta corregida');return false}
 function voidSale(id){const ab=D.payments.filter(a=>a.mid===id).length;
  if(!confirm('¿Anular esta venta? El stock vuelve a su lote'+(ab?' y se borran sus '+ab+' pago(s) de deuda':'')+'.'))return;
  sLines(id).forEach(x=>{const p=P(x.pid);if(!p)return;
@@ -394,12 +404,71 @@ function monthOpts(){const [cy,cm]=today().slice(0,7).split('-').map(Number);let
   .map(([k,t])=>`<option value="${k}" ${k===range?'selected':''}>${t}</option>`).join('')}
 function debts(){return D.sales.filter(z=>z.credit).map(z=>{const t=saleTotal(z.id),ab=D.payments.filter(a=>a.mid===z.id).reduce((q,a)=>q+a.amount,0),pag=z.paid+ab;
  return{s:z,t,pag,debe:Math.round((t-pag)*100)/100}}).filter(d=>d.debe>0.005).sort((a,b)=>a.s.date<b.s.date?-1:1)}
-function vDeu(){const l=debts(),tt=l.reduce((q,d)=>q+d.debe,0);
- return `<h2>Deudas</h2><div class="card"><div class="mut">Total por cobrar</div><div class="big" style="color:var(--warn)">${money(tt)}</div></div>`+
- (l.length?l.map(d=>`<div class="card"><div class="row"><div><b>${esc(d.s.client||'Sin nombre')}</b>
-  <div class="mut">${lineTxt(d.s.id)} · ${fd(d.s.date)}</div>
-  <div class="mut">Total ${money(d.t)} · Pagó ${money(d.pag)}</div></div>
-  <div style="text-align:right"><div class="big" style="color:var(--bad)">${money(d.debe)}</div><button class="btn sm" style="margin-top:6px" onclick="payForm('${d.s.id}')">Cobrar</button></div></div></div>`).join(''):`<div class="empty">Nadie te debe nada.</div>`)}
+let dq='';
+const ckey=n=>(n||'Sin nombre').trim().toLowerCase();
+function debtGroups(){const m={};
+ debts().forEach(d=>{const k=ckey(d.s.client),g=m[k]||(m[k]={key:k,name:(d.s.client||'Sin nombre').trim(),items:[],debe:0});g.items.push(d);g.debe=Math.round((g.debe+d.debe)*100)/100});
+ return Object.values(m).sort((x,y)=>y.debe-x.debe)}
+function clientPays(key){return D.payments.filter(a=>{const z=S(a.mid);return z&&ckey(z.client)===key}).sort((x,y)=>x.date<y.date?1:x.date>y.date?-1:x.id<y.id?1:-1)}
+function debBody(){const q=dq.toLowerCase(),g=debtGroups().filter(x=>!q||x.name.toLowerCase().includes(q));
+ return g.length?g.map(x=>{const old=x.items.map(d=>d.s.date).sort()[0];
+  return `<div class="card" onclick="cliForm('${encodeURIComponent(x.key)}')"><div class="row"><div><b>${esc(x.name)}</b>
+  <div class="mut">${x.items.length} pedido${x.items.length==1?'':'s'} pendiente${x.items.length==1?'':'s'} · la más antigua: ${fd(old)}</div></div>
+  <div style="text-align:right"><div class="big" style="color:var(--bad)">${money(x.debe)}</div><button class="btn sm" style="margin-top:6px">Pagos y detalle</button></div></div></div>`}).join(''):'<div class="empty">Nadie te debe nada.</div>'}
+function vDeu(){const g=debtGroups(),tt=g.reduce((q,x)=>q+x.debe,0);
+ return `<h2>Deudas</h2><div class="card"><div class="mut">Total por cobrar</div><div class="big" style="color:var(--warn)">${money(tt)}</div><div class="mut">${g.length} cliente${g.length==1?'':'s'}</div></div>
+ <input id="dqs" placeholder="Buscar cliente" value="${esc(dq)}" oninput="dq=this.value;$('#db').innerHTML=debBody()" autocomplete="off" style="margin-bottom:10px">
+ <div id="db">${debBody()}</div><p class="mut">Toca un cliente para registrar un pago (completo o parcial), ver cada uno de sus pedidos con sus pagos.</p>`}
+function cliOrders(key){return D.sales.filter(z=>z.credit&&ckey(z.client)===key).map(z=>{
+ const t=saleTotal(z.id),ab=D.payments.filter(a=>a.mid===z.id).sort((x,y)=>x.date<y.date?-1:x.date>y.date?1:0),pag=z.paid+ab.reduce((q,a)=>q+a.amount,0);
+ return{z,t,ab,pag,debe:Math.round((t-pag)*100)/100}}).sort((x,y)=>x.z.date<y.z.date?1:x.z.date>y.z.date?-1:x.z.id<y.z.id?1:-1)}
+function ordCard(o,ke,open){const z=o.z,d=o.debe>0.005,op=open?open===z.id:d;
+ return `<details class="ord" ${op?'open':''}><summary><div class="row"><div><b>Pedido del ${fd(z.date)}</b><div class="mut">${lineTxt(z.id)}</div></div>
+ <div style="text-align:right"><b>${money(o.t)}</b><div><span class="pill ${d?'pronto':'ok'}">${d?'Debe '+money(o.debe):'Pagado'}</span></div></div></div></summary>
+ <div class="ordb">`+sLines(z.id).map(x=>`<div class="lot"><span>${esc(x.name)} · ${un(x.qty,x.unit||'unidad')} × ${money(x.price)}</span><b>${money(x.qty*x.price)}</b></div>`).join('')+
+ `<div class="lot"><span>Pagó al hacer el pedido${z.method?' ('+esc(z.method)+')':''}</span><b>${money(z.paid)}</b></div>`+
+ o.ab.map(a=>`<div class="lot"><span>Abono ${fd(a.date)} · ${esc(a.method)}${a.note?' · '+esc(a.note):''}${a.by?' · '+esc(a.by):''}</span><span><b>${money(a.amount)}</b>${ADM()?` <button class="btn sm ghost" onclick="payEdit('${a.id}','${ke}')">Editar</button>`:''}</span></div>`).join('')+
+ `<div class="row" style="margin:8px 0"><b>Saldo de este pedido</b><b style="color:${d?'var(--bad)':'var(--ok)'}">${money(Math.max(o.debe,0))}</b></div>`+
+ (d?`<form onsubmit="return doPayOrder(event,'${z.id}','${ke}')">
+ <div class="r2"><label>Monto (S/)<input name="a" type="number" step="0.01" min="0.01" max="${o.debe}" required placeholder="Hasta ${money(o.debe)}"></label>
+ <label>Forma de pago<select name="m">${METHODS.map(m=>`<option>${m}</option>`).join('')}</select></label></div>
+ <label>Fecha del pago<input name="d" type="date" min="2025-09-01" max="${today()}" value="${today()}" required></label>
+ <label>Nota (opcional)<input name="t" placeholder="Ej: abono parcial"></label>
+ <button class="btn">Registrar pago de este pedido</button></form>`:'')+
+ `<button class="btn ghost" onclick="saleForm('${z.id}')">Ver pedido completo${ADM()?' o corregirlo':''}</button></div></details>`}
+function cliForm(ke,open){const key=decodeURIComponent(ke),os=cliOrders(key),debe=os.reduce((q,o)=>q+Math.max(o.debe,0),0),name=os[0]?(os[0].z.client||'Sin nombre').trim():key;
+ modal(`<h2>${esc(name)}</h2><div class="card"><div class="mut">Debe en total</div><div class="big" style="color:${debe>0.005?'var(--bad)':'var(--ok)'}">${money(debe)}</div>
+ <div class="mut">${os.length} pedido${os.length==1?'':'s'} a crédito · ${os.filter(o=>o.debe>0.005).length} con deuda</div></div>
+ <h3>Pedidos</h3><div class="mut" style="margin:-4px 0 8px">Cada pedido tiene sus propios pagos. Toca uno para abrirlo o cerrarlo.</div>`+
+ (os.length?os.map(o=>ordCard(o,ke,open)).join(''):'<div class="mut">Este cliente no tiene pedidos a crédito.</div>')+
+ (ADM()&&os.length?`<button class="btn ghost" style="margin-top:6px" onclick="renameCli('${ke}')">Cambiar nombre del cliente</button>`:'')+
+ `<button class="btn ghost" onclick="closeM()">Cerrar</button>`)}
+function doPayOrder(e,sid,ke){e.preventDefault();const f=new FormData(e.target),o=cliOrders(decodeURIComponent(ke)).find(x=>x.z.id===sid),amt=Math.round(+f.get('a')*100)/100,dt=f.get('d');
+ if(!o)return false;
+ if(amt<=0||amt>o.debe+0.005){toast('El monto no puede pasar de '+money(o.debe));return false}
+ if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
+ D.payments.push({id:uid(),mid:sid,date:dt,amount:amt,method:f.get('m'),note:(f.get('t')||'').trim(),by:myName});
+ save();render();cliForm(ke,sid);toast('Pago de '+money(amt)+' registrado en el pedido del '+fd(o.z.date),4000);return false}
+function payEdit(aid,ke){const a=D.payments.find(x=>x.id===aid);if(!a)return;const z=S(a.mid),dd=debts().find(d=>d.s.id===a.mid),mx=Math.round(((dd?dd.debe:0)+a.amount)*100)/100;
+ modal(`<h2>Editar pago</h2><p class="mut">${esc(z?z.client:'')} · pedido del ${z?fd(z.date):''}</p>
+ <form onsubmit="return savePay(event,'${aid}','${ke}')">
+ <div class="r2"><label>Monto (S/)<input name="a" type="number" step="0.01" min="0.01" max="${mx}" required value="${a.amount}"></label>
+ <label>Forma de pago<select name="m">${METHODS.map(m=>`<option ${m===a.method?'selected':''}>${m}</option>`).join('')}</select></label></div>
+ <label>Fecha del pago<input name="d" type="date" min="2025-09-01" max="${today()}" value="${a.date}" required></label>
+ <label>Nota<input name="t" value="${esc(a.note||'')}"></label>
+ <button class="btn">Guardar</button></form>
+ <button class="btn ghost" style="color:var(--bad)" onclick="delPay('${aid}','${ke}')">Eliminar este pago</button>
+ <button class="btn ghost" onclick="cliForm('${ke}','${a.mid}')">Volver</button>`)}
+function savePay(e,aid,ke){e.preventDefault();const a=D.payments.find(x=>x.id===aid),f=new FormData(e.target);if(!a)return false;
+ const amt=Math.round(+f.get('a')*100)/100,dt=f.get('d'),dd=debts().find(d=>d.s.id===a.mid),mx=Math.round(((dd?dd.debe:0)+a.amount)*100)/100;
+ if(amt<=0||amt>mx+0.005){toast('El monto no puede pasar de '+money(mx));return false}
+ if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
+ a.amount=amt;a.method=f.get('m');a.date=dt;a.note=(f.get('t')||'').trim();save();render();cliForm(ke,a.mid);toast('Pago corregido');return false}
+function delPay(aid,ke){if(!confirm('¿Eliminar este pago? La deuda volverá a subir por ese monto.'))return;
+ const mid=(D.payments.find(x=>x.id===aid)||{}).mid;D.payments=D.payments.filter(x=>x.id!==aid);save();render();cliForm(ke,mid);toast('Pago eliminado')}
+function renameCli(ke){const key=decodeURIComponent(ke),g=debtGroups().find(x=>x.key===key),z0=clientPays(key)[0],cur=g?g.name:(z0&&S(z0.mid)?S(z0.mid).client:key);
+ const n=ask('Nuevo nombre del cliente (si ya existe otro igual, se juntan)',cur);if(!n||n===cur)return;
+ D.sales.forEach(z=>{if(ckey(z.client)===key)z.client=n});save();render();cliForm(encodeURIComponent(ckey(n)));toast('Nombre cambiado')}
 function payForm(id){const d=debts().find(z=>z.s.id===id);if(!d)return;const hist=D.payments.filter(a=>a.mid===id);
  modal(`<h2>Cobrar a ${esc(d.s.client)}</h2><p class="mut">${lineTxt(id)} · Debe ${money(d.debe)}</p>
  <form onsubmit="return doPay(event,'${id}')">
