@@ -88,7 +88,7 @@ function migrate(){
 migrate();
 /* ---------- Nube (Firebase): entrar, guardar y sincronizar ---------- */
 const OWNER='salyn0store@gmail.com';
-let user=null,ready=false,synced={},unsubs=[],syncErr='',role='',isOwner=false,myName='',TEAM={};
+let user=null,ready=false,synced={},unsubs=[],syncErr='',pend=0,role='',isOwner=false,myName='',TEAM={};
 const ADM=()=>role==='admin';
 const COLS=['products','moves','sales','payments','combos'];
 const canon=o=>JSON.stringify(o,(k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.keys(v).sort().reduce((a,x)=>(a[x]=v[x],a),{}):v);
@@ -100,7 +100,7 @@ function save(){
   Object.keys(synced).forEach(k=>{if(k.startsWith(c+'/')&&!seen[k]){delete synced[k];ops.push({col:c,id:k.slice(c.length+1),del:true})}})});
  const m=canon({cats:D.cats,reasons:D.reasons});
  if(synced['config/main']!==m){synced['config/main']=m;ops.push({col:'config',id:'main',data:{cats:D.cats,reasons:D.reasons}})}
- if(ops.length)FB.write(ops).then(()=>{if(syncErr){syncErr='';updStatus()}}).catch(e=>{syncErr=e.code||e.message||'error';ops.forEach(o=>{delete synced[o.col+'/'+o.id]});updStatus();toast('⚠ No se guardó en la nube: '+syncErr,6000)})}
+ if(ops.length){pend++;updStatus();FB.write(ops).then(()=>{pend--;syncErr='';updStatus()}).catch(e=>{pend--;syncErr=e.code||e.message||'error';ops.forEach(o=>{delete synced[o.col+'/'+o.id]});updStatus();toast('⚠ No se guardó en la nube: '+syncErr,6000)})}}
 function retrySave(){if(!ready)return;syncErr='';save();updStatus();toast('Reintentando guardar…')}
 function normalize(){COLS.forEach(c=>D[c].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0))}
 function onSnap(col,snap){let ch=false;
@@ -112,7 +112,7 @@ function onSnap(col,snap){let ch=false;
 function softRender(){const a=document.activeElement;
  if($('#m').className==='on'||(a&&/INPUT|SELECT|TEXTAREA/.test(a.tagName||'')))return;render()}
 function updStatus(){const e=$('#stt');if(!ready){e.textContent='';return}
- e.textContent=syncErr?'⚠ No se guardó · toca para reintentar':(navigator.onLine?'● En línea':'● Sin internet (se guarda y sube al volver)')+' · '+myName}
+ e.textContent=syncErr?'⚠ No se guardó · toca para reintentar':(navigator.onLine?(pend>0?'⏳ Guardando…':'✓ Todo guardado'):'● Sin internet (se guarda y sube al volver)')+' · '+myName}
 function showLogin(msg){$('#nav').style.display='none';$('#stt').textContent='';
  $('#v').innerHTML=`<h2>Entrar</h2><div class="card"><form onsubmit="return doLogin(event)">
  <label>Correo<input name="e" type="email" required autocomplete="username" value="${esc(localStorage.getItem('salyn_email')||'')}"></label>
@@ -295,7 +295,7 @@ function doIn(e){e.preventDefault();const f=new FormData(e.target),p=P(f.get('p'
 
 /* ---------- Vender (varios productos; sale primero el lote que vence antes) ---------- */
 const S=id=>D.sales.find(x=>x.id===id);
-const sLines=sid=>D.moves.filter(x=>x.type==='out'&&x.sid===sid);
+const sLines=sid=>D.moves.filter(x=>x.type==='out'&&x.sid===sid).sort((a,b)=>(a.ln||0)-(b.ln||0));
 const saleTotal=sid=>sLines(sid).reduce((t,x)=>t+x.qty*x.price,0);
 const lineTxt=sid=>{const l=sLines(sid),cb=[...new Set(l.map(x=>x.combo).filter(Boolean))];return l.map(x=>esc(x.name)+' ×'+x.qty).join(', ')+(cb.length?' · Combo: '+cb.map(esc).join(', '):'')};
 const cartQty=pid=>cart.filter(c=>c.pid===pid).reduce((t,c)=>t+c.qty,0);
@@ -355,10 +355,10 @@ function doSell(e){e.preventDefault();const f=new FormData(e.target);
  if(cr&&!cl){toast('Escribe el nombre del cliente que debe');return false}
  for(const c of cart){const p=P(c.pid);if(!p||cartQty(c.pid)>sellable(p)){toast('Ya no hay stock suficiente de '+(p?p.name:'un producto'));return false}}
  const sid=uid(),gross=cartTotal(),dsv=+f.get('ds')||0,disc=Math.min(gross,f.get('dt')==='P'?gross*Math.min(dsv,100)/100:dsv),total=gross-disc,fac=gross>0?total/gross:1;
- cart.forEach(c=>{const p=P(c.pid);let need=c.qty,cost=0;const used=[];
+ cart.forEach((c,ci)=>{const p=P(c.pid);let need=c.qty,cost=0;const used=[];
   for(const l of p.lots.filter(l=>l.qty>0&&(!l.exp||l.exp>=today())).sort(ord)){if(!need)break;const t=Math.min(l.qty,need);l.qty-=t;need-=t;cost+=t*l.cost;used.push({id:l.id,date:l.date,exp:l.exp,cost:l.cost,qty:t})}
   p.lots=p.lots.filter(l=>l.qty>0);
-  D.moves.push(Object.assign(mv('out',p,c.qty,cost/c.qty,c.price*fac),{date:dt,sid,lots:used,combo:c.combo||''}))});
+  D.moves.push(Object.assign(mv('out',p,c.qty,cost/c.qty,c.price*fac),{date:dt,sid,lots:used,combo:c.combo||'',ln:ci}))});
  const paid=cr?Math.min(Math.max(+f.get('pg')||0,0),total):total,debe=total-paid;
  D.sales.push({id:sid,date:dt,method:f.get('m'),paid,credit:cr&&debe>0.005,client:cl,by:myName,disc:Math.round(disc*100)/100});
  const rest=[...new Set(cart.map(c=>c.pid))].map(id=>{const q=P(id);return q?q.name+': quedan '+un(stock(q),q.unit):''}).filter(Boolean).join(' · ');
@@ -368,7 +368,10 @@ function saleForm(id){const z=S(id);if(!z)return;const ab=D.payments.filter(a=>a
  `<div class="row" style="margin:8px 0"><b>Total</b><b>${money(saleTotal(id))}</b></div>${z.disc>0?`<div class="mut">Incluye un descuento de ${money(z.disc)}</div>`:''}
  <div class="mut">Pagó al vender: ${money(z.paid)}${ab.length?' · Pagos posteriores: '+money(ab.reduce((t,a)=>t+a.amount,0)):''}</div>
  <div class="mut">${z.method||'Sin dato'}${z.client?' · Cliente: '+esc(z.client):''}${z.by?' · Vendió: '+esc(z.by):''}</div>`+
- (ADM()?`<h3>Corregir datos</h3><form onsubmit="return editSale(event,'${id}')">
+ (ADM()?`<h3>Corregir precios</h3><form onsubmit="return editPrices(event,'${id}')">
+ ${sLines(id).map((x,i)=>`<label>${esc(x.name)} ×${x.qty} · precio por unidad (S/)<input name="p${i}" type="number" step="0.01" min="0" value="${Math.round(x.price*100)/100}"></label>`).join('')}
+ <button class="btn">Guardar precios</button></form>
+ <h3>Corregir datos</h3><form onsubmit="return editSale(event,'${id}')">
  <div class="r2"><label>Fecha<input name="d" type="date" min="2025-09-01" max="${today()}" value="${z.date}" required></label>
  <label>Forma de pago<select name="m">${METHODS.map(m=>`<option ${m===z.method?'selected':''}>${m}</option>`).join('')}</select></label></div>
  <label>Cliente<input name="cl" value="${esc(z.client||'')}" placeholder="Nombre (obligatorio si es fiado)"></label>
@@ -378,6 +381,12 @@ function saleForm(id){const z=S(id);if(!z)return;const ab=D.payments.filter(a=>a
  <button class="btn ghost" style="color:var(--bad)" onclick="voidSale('${id}')">Anular venta</button>`:'')+
  `<button class="btn ghost" onclick="closeM()">Cerrar</button>`+
  (ADM()?`<p class="mut">Si te equivocaste de producto, cantidad o precio: anula la venta (el stock vuelve a su lote) y regístrala de nuevo.</p>`:'<p class="mut">Si hay un error en esta venta, avísale a la dueña para corregirla.</p>'))}
+function editPrices(e,id){e.preventDefault();const f=new FormData(e.target),z=S(id),ls=sLines(id);
+ const np=ls.map((x,i)=>{const v=+f.get('p'+i),o=Math.round(x.price*100)/100;return isNaN(v)||v<0||Math.abs(v-o)<0.005?x.price:v});
+ const total=ls.reduce((t,x,i)=>t+x.qty*np[i],0),ab=D.payments.filter(a=>a.mid===id).reduce((t,a)=>t+a.amount,0);
+ if(z.credit&&z.paid+ab>total+0.005){toast('Los pagos ya registrados ('+money(z.paid+ab)+') superan el nuevo total ('+money(total)+'). Corrige o elimina un pago primero.',6000);return false}
+ ls.forEach((x,i)=>x.price=np[i]);if(!z.credit)z.paid=total;
+ save();closeM();render();toast('Precios corregidos. Nuevo total: '+money(total));return false}
 function editSale(e,id){e.preventDefault();const f=new FormData(e.target),z=S(id),dt=f.get('d'),cl=(f.get('cl')||'').trim(),cr=f.get('cr')==='on',tot=saleTotal(id);
  if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
  if(cr&&!cl){toast('Escribe el nombre del cliente que debe');return false}
@@ -388,11 +397,15 @@ function editSale(e,id){e.preventDefault();const f=new FormData(e.target),z=S(id
  sLines(id).forEach(x=>x.date=dt);save();closeM();render();toast('Venta corregida');return false}
 function voidSale(id){const ab=D.payments.filter(a=>a.mid===id).length;
  if(!confirm('¿Anular esta venta? El stock vuelve a su lote'+(ab?' y se borran sus '+ab+' pago(s) de deuda':'')+'.'))return;
- sLines(id).forEach(x=>{const p=P(x.pid);if(!p)return;
-  if(x.lots&&x.lots.length)x.lots.forEach(c=>{const l=p.lots.find(z=>z.id===c.id);if(l)l.qty+=c.qty;else p.lots.push({id:c.id,date:c.date,exp:c.exp,qty:c.qty,cost:c.cost})});
-  else p.lots.push({id:uid(),date:'',exp:'',qty:x.qty,cost:x.cost})});
+ const back=[],gone=[];let exp=0;
+ sLines(id).forEach(x=>{const p=P(x.pid);if(!p){gone.push(x.name);return}
+  if(x.lots&&x.lots.length)x.lots.forEach(c=>{if(c.exp&&c.exp<today())exp+=c.qty;const l=p.lots.find(z=>z.id===c.id);if(l)l.qty+=c.qty;else p.lots.push({id:c.id,date:c.date,exp:c.exp,qty:c.qty,cost:c.cost})});
+  else p.lots.push({id:uid(),date:'',exp:'',qty:x.qty,cost:x.cost});
+  back.push({id:p.id,q:x.qty})});
  D.moves=D.moves.filter(x=>!(x.type==='out'&&x.sid===id));D.sales=D.sales.filter(z=>z.id!==id);D.payments=D.payments.filter(a=>a.mid!==id);
- save();closeM();render();toast('Venta anulada')}
+ save();closeM();render();
+ toast('Venta anulada. Volvieron al inventario: '+(back.map(b=>{const p=P(b.id);return p?p.name+' +'+b.q+(p.kit?' (combo ya armado, no los productos sueltos)':'')+' → ahora '+un(stock(p),p.unit):''}).filter(Boolean).join(' · ')||'nada')
+  +(exp?' ⚠ '+exp+' unidad(es) estaban en un lote ya vencido y pasaron a Mermas.':'')+(gone.length?' ⚠ No se pudo devolver '+gone.join(', ')+' porque el producto ya no existe.':''),9000)}
 
 /* ---------- Meses y Deudas ---------- */
 const METHODS=['Efectivo','Yape','Transferencia'];
