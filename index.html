@@ -53,11 +53,14 @@ nav button.on{color:var(--rose);font-weight:700;box-shadow:inset 0 3px 0 var(--r
 .ord summary{padding:12px;cursor:pointer;list-style:none}
 .ord summary::-webkit-details-marker{display:none}
 .ordb{padding:0 12px 12px;border-top:1px dashed var(--line)}
+#sc{display:none;position:fixed;inset:0;background:rgba(20,10,20,.92);z-index:8;overflow:auto}
+#sc.on{display:block}
+#scv video{width:100%;display:block}
 </style></head><body>
 <header><b>Salyn Store</b> <span class="mut" style="color:#e9c9d6">· Inventario y ventas</span><span id="stt" onclick="retrySave()" style="float:right;font-size:13px;color:#e9c9d6;cursor:pointer"></span></header>
 <main id="v"></main>
 <nav id="nav"></nav>
-<div id="m"></div><div id="t"></div>
+<div id="m"></div><div id="sc"></div><div id="t"></div>
 <script>
 const $=s=>document.querySelector(s);
 const CATS=['Skincare','Maquillaje','Mascarillas','Cremas','Pestañas','Perfumes','Uñas','Cabello','Accesorios','Otros'];
@@ -143,7 +146,7 @@ async function startSync(){
  ready=true;$('#nav').style.display='flex';updStatus();
  const loc=localStorage.getItem('salynpos');
  if(loc&&ADM()&&!D.products.length&&!D.moves.length){try{const d=JSON.parse(loc);if(d.products&&d.products.length)offerImport(d)}catch(e){}}
- tab=ADM()?'productos':'vender';migrate();save();render()}
+ tab='inicio';migrate();save();render()}
 function offerImport(d){
  modal(`<h2>Encontré datos en este aparato</h2><p>Hay ${d.products.length} producto(s) y ${(d.moves||[]).length} movimiento(s) guardados solo aquí. ¿Los subo a la nube para verlos en todos tus aparatos?</p>
  <button class="btn" onclick="doImport()">Sí, subirlos</button><button class="btn ghost" onclick="closeM()">No, empezar vacío</button>`);window._imp=d}
@@ -165,6 +168,7 @@ async function exportXlsx(){
  add('Mermas',D.moves.filter(x=>x.type==='merma').map(x=>({Fecha:x.date,Producto:x.name,Cantidad:x.qty,Costo:x.cost,'Pérdida':x.qty*x.cost,Motivo:x.reason||'Vencido',Nota:x.note||''})));
  add('Inventario',D.products.map(p=>({'Código':p.code,Producto:p.name,'Categoría':p.cat,'Presentación':p.unit,Stock:stock(p),'Avisar si quedan ≤':p.min,'Costo total en stock':invVal(p),'Precio de venta':p.price,'Valor a precio de venta':stock(p)*p.price,'Vence primero':nextExp(p)})));
  add('Ajustes de stock',D.moves.filter(x=>x.type==='ajuste').map(x=>({Fecha:x.date,Producto:x.name,Diferencia:x.qty,Costo:x.cost,Motivo:x.reason||'',Nota:x.note||'','Quién':x.by||''})));
+ add('Gastos',D.moves.filter(x=>x.type==='gasto').map(x=>({Fecha:x.date,Concepto:x.name,'Categoría':x.gcat,Monto:x.cost,'Forma de pago':x.method||'',Nota:x.note||''})));
  XLSX.writeFile(W,'salyn-pos-'+today()+'.xlsx')}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'S/ '+(+n||0).toFixed(2);
@@ -211,8 +215,9 @@ function delCat(i){if(D.cats.length<2)return toast('Debe quedar al menos una cat
 
 /* ---------- Productos ---------- */
 function vProd(){
-  const ql=q.toLowerCase(),l=D.products.filter(p=>(p.name.toLowerCase().includes(ql)||p.code.toLowerCase().includes(ql))&&(!fc||p.cat===fc));
+  const ql=q.toLowerCase(),l=D.products.filter(p=>(p.name.toLowerCase().includes(ql)||p.code.toLowerCase().includes(ql)||(p.barcode||'').includes(ql))&&(!fc||p.cat===fc));
   return `<h2>Productos</h2>
+  ${ADM()?'<button class="btn ghost" style="margin:0 0 10px" onclick="scanProd()">📷 Escanear un producto para editarlo</button>':''}
   <input placeholder="Buscar por nombre o código" value="${esc(q)}" oninput="q=this.value;render(true)" id="s">
   <div class="r2" style="margin-top:10px">
    <select onchange="fc=this.value;render()" style="margin:0"><option value="">Todas las categorías</option>${D.cats.map(c=>`<option ${c===fc?'selected':''}>${esc(c)}</option>`).join('')}</select>
@@ -220,9 +225,9 @@ function vProd(){
   ${ADM()?'<button class="btn" onclick="pForm(\'\')" style="margin:10px 0 12px">+ Nuevo producto</button>':'<div style="height:12px"></div>'}`+
   (l.length?l.map(p=>{const s=st(p),ne=nextExp(p);return `<div class="card" ${ADM()?`onclick="pForm('${p.id}')"`:''}>
     <div class="row"><b>${esc(p.name)}</b><span class="pill ${s}">${s==='vencido'?'Tiene vencidos':s==='pronto'?'Vence '+fd(ne):'Stock '+un(stock(p),p.unit)}</span></div>
-    <div class="mut"><span class="code">${esc(p.code)}</span> · ${esc(p.cat)} · Stock total ${un(stock(p),p.unit)}</div>
+    <div class="mut"><span class="code">${esc(p.code)}</span> · ${esc(p.cat)} · Stock total ${un(stock(p),p.unit)}${p.barcode?' · ▮▮ '+esc(p.barcode):''}</div>
     <div class="mut">${ADM()?`Costo ${money(p.cost)} · Venta ${money(p.price)} por ${p.unit} · Ganas ${money(p.price-p.cost)}${p.buy&&p.cpack?' · Compra: '+p.buy.pack+' de '+p.buy.per+' a '+money(p.cpack):''}`:`Precio ${money(p.price)} por ${p.unit}`}</div>
-    ${p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}</span><span class="pill ${ls(x)}">${ls(x)==='vencido'?'Vencido':ls(x)==='pronto'?'Por vencer':'Bien'}</span></div>`).join('')}</div>`}).join(''):
+    ${p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}${ADM()&&x.est?' · <i>costo estimado</i>':''}</span><span class="pill ${ls(x)}">${ls(x)==='vencido'?'Vencido':ls(x)==='pronto'?'Por vencer':'Bien'}</span></div>`).join('')}</div>`}).join(''):
   `<div class="empty">${D.products.length?'No encontré productos con ese filtro.':(ADM()?'Aún no tienes productos. Toca “+ Nuevo producto” para empezar.':'Aún no hay productos registrados.')}</div>`);
 }
 function pForm(id){const p=P(id)||{};
@@ -230,6 +235,8 @@ function pForm(id){const p=P(id)||{};
  <label>Nombre<input name="n" required value="${esc(p.name||'')}"></label>
  <div class="r2"><label>Código único<input name="k" required value="${esc(p.code||nextCode())}"></label>
  <label>Se maneja por<select name="u" onchange="$('#cul').textContent=this.value;buyDef();buyCalc()">${unitOpts(p.unit||'unidad')}</select></label></div>
+ <label>Código de barras (el que trae el producto)<input name="bcode" id="bcode" inputmode="numeric" autocomplete="off" value="${esc(p.barcode||'')}" placeholder="Escanéalo o escríbelo"></label>
+ <div class="r2" style="margin-bottom:10px"><button type="button" class="btn ghost" style="margin:0" onclick="scanCode()">📷 ${p.barcode?'Rectificar código':'Escanear código'}</button>${p.barcode?`<button type="button" class="btn ghost" style="margin:0" onclick="$('#bcode').value=''">Quitar código</button>`:'<span></span>'}</div>
  <label>Categoría<select name="c" id="cs" onchange="catSel(this.value)">${catOpts(p.cat)}</select></label>
  <div class="r2"><label>Costo (S/) de cada <span id="cul">${p.unit||'unidad'}</span><input name="co" id="co" type="number" step="0.0001" min="0" required value="${p.cost!=null?Math.round(p.cost*10000)/10000:''}"></label>
  <label>Precio de venta (S/)<input name="pr" type="number" step="0.01" min="0" required value="${p.price??''}"></label></div>
@@ -244,7 +251,8 @@ function pForm(id){const p=P(id)||{};
  ${id?'':`<h3>Primer lote (opcional)</h3>
  <div class="r2"><label>Cantidad<span id="slu"></span><input name="st" type="number" min="0" step="any" value="0"></label>
  <label>Fecha de entrega<input name="de" type="date" min="2025-09-01" max="${today()}" value="${today()}"></label></div>
- <label>Fecha de vencimiento<input name="ex" type="date"></label>`}
+ <label>Fecha de vencimiento<input name="ex" type="date"></label>
+ <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:15px"><input type="checkbox" name="est" style="width:auto;margin:0"> El costo es estimado (no tengo la boleta)</label>`}
  ${id&&p.lots.length?`<h3>Lotes (para corregir errores)</h3>`+p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}</span><button type="button" class="btn sm ghost" onclick="delLot('${id}','${x.id}')">Quitar</button></div>`).join(''):''}
  <button class="btn" style="margin-top:14px">Guardar</button>
  ${id?`<button type="button" class="btn ghost" onclick="delP('${id}')">Eliminar producto</button>`:''}
@@ -254,12 +262,13 @@ function savP(e,id){e.preventDefault();const f=new FormData(e.target),code=f.get
  if(f.get('c')==='__new'){toast('Elige una categoría');return false}
  const o={name:f.get('n').trim(),code,unit:f.get('u'),cat:f.get('c'),cost:+f.get('co'),price:+f.get('pr'),min:+f.get('mn')};
  const bp=f.get('bp')||'unidad',bn=Math.round(+f.get('bn'))||0,bc=+f.get('bc')||0,buyUse=bp!=='unidad'&&bn>0&&bc>0;
+ o.barcode=normBC(f.get('bcode'))||null;const dup=o.barcode&&D.products.find(x=>x.id!==id&&normBC(x.barcode)===o.barcode);
  o.buy=(bp!=='unidad'&&bn>0)?{pack:bp,per:bn}:null;o.cpack=buyUse?bc:null;if(buyUse)o.cost=Math.round(bc/bn*10000)/10000;
  if(id){const q0=P(id);if(q0.cost!==o.cost){delete q0.cbase;delete q0.emp}Object.assign(q0,o)}
  else{o.id=uid();o.lots=[];const n=Math.round((+f.get('st')||0)*(buyUse?bn:1)*10000)/10000;
-  if(n)o.lots.push(Object.assign({id:uid(),date:f.get('de')||today(),exp:f.get('ex'),qty:n,cost:o.cost,cbase:o.cost},buyUse?{bq:+f.get('st'),bpk:bp,bpr:bc,bper:bn}:{}));
-  D.products.push(o);if(n)D.moves.push(Object.assign(mv('in',o,n,o.cost,o.price),{date:f.get('de')||today()}))}
- save();closeM();render();toast('Producto guardado');return false}
+  let lot0=null;if(n){lot0=Object.assign({id:uid(),date:f.get('de')||today(),exp:f.get('ex'),qty:n,cost:o.cost,cbase:o.cost},buyUse?{bq:+f.get('st'),bpk:bp,bpr:bc,bper:bn}:{},f.get('est')==='on'?{est:true}:{});o.lots.push(lot0)}
+  D.products.push(o);if(n)D.moves.push(Object.assign(mv('in',o,n,o.cost,o.price),{date:f.get('de')||today(),lid:lot0.id}))}
+ save();closeM();render();toast('Producto guardado'+(dup?' · Ojo: ese código también lo tiene '+dup.name+' (¿otro tono?)':''),dup?6000:undefined);return false}
 function buyDef(){const bp=$('#bp').value,u=$('[name=u]').value;
  $('#bpl').textContent=bp==='unidad'?'paquete':bp;
  const n=$('#bn');if(bp==='unidad')n.value='';else if(['','1','10','12'].includes(String(n.value)))n.value=(bp==='docena'&&u==='unidad')?12:(bp==='decena'&&u==='unidad')?10:1}
@@ -281,6 +290,7 @@ function vIn(){
   if(!D.products.length)return `<h2>Entrada de mercadería</h2><div class="empty">Primero crea un producto en la pestaña Productos.</div>`;
   const p=D.products[0],pk=packOf(p),base=p.cbase??p.cost,pv=pk?(p.cpack??Math.round(base*pk.per*100)/100):Math.round(base*100)/100;
   return `<h2>Entrada de mercadería</h2><div class="card"><form onsubmit="return doIn(event)">
+  <button type="button" class="btn ghost" style="margin:0 0 10px" onclick="scanEntry()">📷 Escanear el producto que llegó</button>
   <label>Producto<select name="p" id="ip" onchange="fillIn(this.value)">${opts(D.products,stock)}</select></label>
   <label id="ibml" style="display:${pk?'block':'none'}">Cómo llegó<select name="bm" id="ibm" onchange="inSwitch()">${pk?`<option value="p">Por ${pk.pack} (trae ${pk.per})</option><option value="u">Por unidad</option>`:'<option value="u">Por unidad</option>'}</select></label>
   <div class="r2"><label>Cantidad (<span id="iul">${pk?pk.pack+'s':UN[p.unit][1]}</span>)<input name="q" id="iq" type="number" min="0.01" step="any" required oninput="inCalc()"></label>
@@ -295,6 +305,8 @@ function vIn(){
   <div class="card" style="background:#f9eef1"><div class="mut">Costo real por <span id="ic3">${p.unit}</span></div><div class="big" id="icr">${money(costoReal(pk?pv/pk.per:pv,p.emp||0,etd.pa,etd.en,etd.ta))}</div><div class="mut" id="icd"></div></div>
   <div class="r2"><label>Fecha de entrega<input name="d" type="date" min="2025-09-01" max="${today()}" required value="${today()}"></label>
   <label>Fecha de vencimiento<input name="x" type="date"></label></div>
+  
+  <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:15px"><input type="checkbox" name="est" style="width:auto;margin:0"> El costo es estimado (no tengo la boleta)</label>
   <button class="btn">Registrar lote</button>
   <button type="button" class="btn ghost" onclick="etd={ta:'',pa:'',en:''};render()">Nueva tanda (borrar pasaje y envío)</button></form></div>
   <p class="mut">Cada entrada crea un lote con su propio costo real. Si compraste varios productos en el mismo viaje, repite el mismo pasaje, envío y unidades de la tanda en cada uno: la app los recuerda para ti.</p>`}
@@ -322,9 +334,9 @@ function doIn(e){e.preventDefault();const f=new FormData(e.target),p=P(f.get('p'
  if(!p||!(n>0))return false;
  if((pa+en)>0&&ta<1){toast('Escribe cuántas unidades tiene la tanda para repartir el pasaje y el envío');return false}
  const c=costoReal(base,em,pa,en,ta||1),cb=Math.round(base*10000)/10000;
- p.lots.push(Object.assign({id:uid(),date:f.get('d'),exp:f.get('x'),qty:n,cost:c,cbase:cb,emp:em,extra:Math.round((pa+en)/(ta||1)*10000)/10000},pk>1?{bq:qi,bpk:p.buy.pack,bpr:price,bper:pk}:{}));
+ const lot=Object.assign({id:uid(),date:f.get('d'),exp:f.get('x'),qty:n,cost:c,cbase:cb,emp:em,extra:Math.round((pa+en)/(ta||1)*10000)/10000},pk>1?{bq:qi,bpk:p.buy.pack,bpr:price,bper:pk}:{},f.get('est')==='on'?{est:true}:{});p.lots.push(lot);
  p.cost=c;p.cbase=cb;p.emp=em;if(pk>1)p.cpack=price;etd={ta:ta?String(ta):'',pa:pa?String(pa):'',en:en?String(en):''};
- D.moves.push(Object.assign(mv('in',p,n,c,p.price),{date:f.get('d')}));
+ D.moves.push(Object.assign(mv('in',p,n,c,p.price),{date:f.get('d'),lid:lot.id}));
  save();toast('Lote registrado: +'+un(n,p.unit)+' de '+p.name+' · costo real '+money(c)+' c/u',4500);render();return false}
 
 /* ---------- Vender (varios productos; sale primero el lote que vence antes) ---------- */
@@ -343,7 +355,8 @@ function vSell(){
   const all=D.products.filter(p=>sellable(p)-cartQty(p.id)>0),l=pickList(),p=l.find(x=>x.id===vsel)||l[0],pu=p?p.unit:'unidad',pr=p?p.price:'';vsel=p?p.id:'';
   const rec=D.sales.slice().sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:a.id<b.id?1:-1).slice(0,15);
   const add=all.length?`<div class="card"><form onsubmit="return addCart(event)"><b>Agregar producto</b>
-  <input id="vs" placeholder="Buscar producto por nombre o código" value="${esc(vsq)}" oninput="vsq=this.value;renderPick()" autocomplete="off" style="margin:8px 0">
+  <button type="button" class="btn ghost" style="margin:8px 0 0" onclick="scanSale()">📷 Escanear código de barras</button>
+  <input id="vs" placeholder="Buscar producto por nombre o código" value="${esc(vsq)}" oninput="vsq=this.value;renderPick()" onkeydown="if(event.key==='Enter'){event.preventDefault();typedSale(this.value)}" autocomplete="off" style="margin:8px 0">
   <div class="pickbox" id="pk">${pickHTML(l)}</div><input type="hidden" name="p" id="pp" value="${vsel}">
   <div class="r2"><label>Cantidad (<span id="su">${UN[pu][1]}</span>)<input name="q" id="sq" type="number" min="1" value="1" required oninput="sub()"></label>
   <label>Precio (S/) por <span id="su2">${pu}</span><input name="c" id="sp" type="number" step="0.01" min="0" required value="${pr}" oninput="sub()"></label></div>
@@ -365,7 +378,7 @@ function vSell(){
   return `<h2>Vender</h2>`+add+cmbSell()+cartH+`<p class="mut">Se vende primero el lote que vence antes. Los lotes vencidos no se pueden vender.</p>`+
    (rec.length?`<h3>Ventas recientes (toca una para corregirla o anularla)</h3>`+rec.map(saleCard).join(''):'')}
 function pickList(){const q=vsq.toLowerCase();
- return D.products.filter(p=>sellable(p)-cartQty(p.id)>0&&(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q)))}
+ return D.products.filter(p=>sellable(p)-cartQty(p.id)>0&&(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q)||(p.barcode||'').includes(q)))}
 function pickHTML(l){return l.length?l.map(p=>`<div class="pk ${p.id===vsel?'sel':''}" onclick="pickP('${p.id}')"><div class="row"><b>${esc(p.name)}</b><span class="code">${esc(p.code)}</span></div><div class="mut">${un(sellable(p)-cartQty(p.id),p.unit)} disponibles · ${money(p.price)}</div></div>`).join(''):'<div class="empty" style="padding:12px">No encontré ese producto.</div>'}
 function renderPick(force){const l=pickList(),changed=!l.some(p=>p.id===vsel);
  if(changed)vsel=l.length?l[0].id:'';
@@ -593,7 +606,7 @@ const pMin=p=>p.min??3;
 const invVal=p=>p.lots.reduce((t,l)=>t+l.qty*l.cost,0);
 function invEstado(p){const q=stock(p);return q===0?'cero':q<=pMin(p)?'bajo':st(p)==='pronto'?'vencer':'ok'}
 function invList(){const q=iq.toLowerCase();
- const l=D.products.filter(p=>(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q))&&(!ic||p.cat===ic)&&
+ const l=D.products.filter(p=>(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q)||(p.barcode||'').includes(q))&&(!ic||p.cat===ic)&&
   (!ie||(ie==='cero'?stock(p)===0:ie==='bajo'?(stock(p)>0&&stock(p)<=pMin(p)):st(p)==='pronto')));
  const ex=p=>nextExp(p)||'9999';
  const k={nombre:(a,b)=>a.name.localeCompare(b.name),stock:(a,b)=>stock(a)-stock(b)||a.name.localeCompare(b.name),valor:(a,b)=>invVal(b)-invVal(a),vence:(a,b)=>ex(a)<ex(b)?-1:ex(a)>ex(b)?1:0};
@@ -612,16 +625,17 @@ function invBody(){const l=invList();
  <div class="card"><div class="mut">Por vencer (30 días)</div><div class="big" style="color:var(--warn)">${venc}</div></div>
  ${ADM()?`<div class="card"><div class="mut">Invertido en stock (a costo)</div><div class="big">${money(cost)}</div></div>
  <div class="card"><div class="mut">Valor a precio de venta</div><div class="big" style="color:var(--ok)">${money(val)}</div></div>`:''}</div>`+
- (l.length?l.map(invCard).join(''):'<div class="empty">No hay productos con estos filtros.</div>')}
+ estNote()+(l.length?l.map(invCard).join(''):'<div class="empty">No hay productos con estos filtros.</div>')}
 function vInv(){return `<h2>Inventario</h2>
+ <button class="btn ghost" style="margin:0 0 10px" onclick="scanInv()">📷 Escanear un producto para ver sus lotes${ADM()?' o contarlo':''}</button>
  <input id="iqs" placeholder="Buscar por nombre o código" value="${esc(iq)}" oninput="iq=this.value;$('#ib').innerHTML=invBody()" autocomplete="off" style="margin-bottom:10px">
  <div class="r2" style="margin-bottom:10px"><select onchange="ic=this.value;$('#ib').innerHTML=invBody()" style="margin:0"><option value="">Todas las categorías</option>${D.cats.map(c=>`<option ${c===ic?'selected':''}>${esc(c)}</option>`).join('')}</select>
  <select onchange="ie=this.value;$('#ib').innerHTML=invBody()" style="margin:0"><option value="">Todos</option><option value="cero" ${ie==='cero'?'selected':''}>Sin stock</option><option value="bajo" ${ie==='bajo'?'selected':''}>Stock bajo</option><option value="vencer" ${ie==='vencer'?'selected':''}>Por vencer (30 días)</option></select></div>
  <select onchange="iso=this.value;$('#ib').innerHTML=invBody()" style="margin:0 0 10px"><option value="nombre" ${iso==='nombre'?'selected':''}>Ordenar: nombre A-Z</option><option value="stock" ${iso==='stock'?'selected':''}>Ordenar: menos stock primero</option><option value="vence" ${iso==='vence'?'selected':''}>Ordenar: vence primero</option>${ADM()?`<option value="valor" ${iso==='valor'?'selected':''}>Ordenar: más dinero invertido</option>`:''}</select>
  <div id="ib">${invBody()}</div><p class="mut">Toca un producto para ver sus lotes${ADM()?' y ajustar el stock con un conteo físico':''}.</p>`}
 function invForm(id){const p=P(id);if(!p)return;const aj=D.moves.filter(x=>x.type==='ajuste'&&x.pid===id).slice(-5).reverse();
- modal(`<h2>${esc(p.name)}</h2><div class="mut"><span class="code">${esc(p.code)}</span> · ${esc(p.cat)} · Stock total ${un(stock(p),p.unit)}</div>
- <h3>Lotes</h3>`+(p.lots.length?p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}${ADM()?' · costo '+money(x.cost)+(x.cbase!=null&&x.cost-x.cbase>0.004?' (producto '+money(x.cbase)+' + extras '+money(x.cost-x.cbase)+')':'')+(x.bq?' · compra: '+x.bq+' '+x.bpk+' × '+money(x.bpr):''):''}</span><span class="pill ${ls(x)}">${ls(x)==='pronto'?'Por vencer':'Bien'}</span></div>`).join(''):'<div class="mut">Sin lotes: no hay stock.</div>')+
+ modal(`<h2>${esc(p.name)}</h2><div class="mut"><span class="code">${esc(p.code)}</span> · ${esc(p.cat)} · Stock total ${un(stock(p),p.unit)}${p.barcode?' · ▮▮ '+esc(p.barcode):''}</div>
+ <h3>Lotes</h3>`+(p.lots.length?p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}${ADM()?' · costo '+money(x.cost)+(x.cbase!=null&&x.cost-x.cbase>0.004?' (producto '+money(x.cbase)+' + extras '+money(x.cost-x.cbase)+')':'')+(x.bq?' · compra: '+x.bq+' '+x.bpk+' × '+money(x.bpr):''):''}</span><span>${ADM()&&x.est?'<span class="pill pronto">costo estimado</span> ':''}<span class="pill ${ls(x)}">${ls(x)==='pronto'?'Por vencer':'Bien'}</span>${ADM()?` <button class="btn sm ghost" onclick="lotEdit('${p.id}','${x.id}')">Editar</button>`:''}</span></div>`).join(''):'<div class="mut">Sin lotes: no hay stock.</div>')+
  (ADM()?`<h3>Ajustar stock (conteo físico)</h3>`+(p.lots.length?`<form onsubmit="return doAjuste(event,'${id}')">
  <label>Lote<select name="l">${lotOpts(p)}</select></label>
  <div class="r2"><label>Cantidad real que contaste<input name="q" type="number" min="0" required></label>
@@ -775,6 +789,157 @@ function doAsm(e,cid){e.preventDefault();const f=new FormData(e.target),n=Math.r
  D.moves.push(Object.assign(mv('armado',k,n,uc,0),{date:today(),note:c.name}));
  save();closeM();render();toast('Armaste '+n+' de '+c.name+' · costo '+money(uc)+' c/u',4500);return false}
 
+/* ---------- Editar el costo de un lote ---------- */
+const estCount=()=>D.products.reduce((t,p)=>t+p.lots.filter(l=>l.est).length,0);
+function estNote(){if(!ADM())return'';const n=estCount();
+ return n?`<div class="card" style="background:#fff7e6"><b>${n} lote${n==1?'':'s'} con costo estimado</b><div class="mut">Cuando consigas la boleta o el precio real, toca el producto, luego "Editar" en el lote, y pon el costo correcto.</div></div>`:''}
+function lotEdit(pid,lid){const p=P(pid),l=p&&p.lots.find(x=>x.id===lid);if(!l)return;
+ modal(`<h2>Editar lote de ${esc(p.name)}</h2><p class="mut">${lotTxt(l,p)}</p>
+ <form onsubmit="return saveLot(event,'${pid}','${lid}')">
+ <label>Costo real por unidad (S/)<input name="c" type="number" step="0.0001" min="0" required value="${Math.round(l.cost*10000)/10000}"></label>
+ <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:15px"><input type="checkbox" name="est" ${l.est?'checked':''} style="width:auto;margin:0"> El costo es estimado (no tengo la boleta)</label>
+ <div class="r2"><label>Fecha de entrega<input name="d" type="date" min="2025-09-01" max="${today()}" value="${l.date||''}"></label>
+ <label>Vencimiento<input name="x" type="date" value="${l.exp||''}"></label></div>
+ <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:15px"><input type="checkbox" name="ap" checked style="width:auto;margin:0"> Aplicar este costo también a las ventas ya hechas de este lote y a la compra</label>
+ <button class="btn">Guardar</button><button type="button" class="btn ghost" onclick="invForm('${pid}')">Volver</button></form>`)}
+function saveLot(e,pid,lid){e.preventDefault();const f=new FormData(e.target),p=P(pid),l=p&&p.lots.find(x=>x.id===lid);if(!l)return false;
+ const nc=Math.round((+f.get('c')||0)*10000)/10000,oc=l.cost,dt=f.get('d')||'';
+ if(dt&&(dt<'2025-09-01'||dt>today())){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
+ let nS=0,nI=0;
+ if(f.get('ap')==='on'&&Math.abs(nc-oc)>0.00005){
+  D.moves.forEach(x=>{if(x.type==='out'&&x.lots&&x.lots.some(c=>c.id===lid)){x.lots.forEach(c=>{if(c.id===lid)c.cost=nc});
+   const q=x.lots.reduce((t,c)=>t+c.qty,0);if(q>0)x.cost=x.lots.reduce((t,c)=>t+c.qty*c.cost,0)/q;nS++}});
+  const ins=D.moves.filter(x=>x.type==='in'&&(x.lid===lid||(!x.lid&&x.pid===pid&&x.date===l.date&&Math.abs(x.cost-oc)<0.0001)));
+  if(ins.length===1){ins[0].cost=nc;nI=1}}
+ l.cost=nc;if(nc<(l.emp||0)+(l.extra||0)){l.emp=0;l.extra=0;l.cbase=nc}else l.cbase=Math.round((nc-(l.emp||0)-(l.extra||0))*10000)/10000;
+ if(f.get('est')==='on')l.est=true;else delete l.est;
+ l.date=dt;l.exp=f.get('x')||'';
+ if(p.lots[p.lots.length-1]===l){p.cost=nc;p.cbase=l.cbase}
+ save();render();invForm(pid);toast('Lote actualizado'+(nS?' · '+nS+' venta'+(nS==1?'':'s')+' recalculada'+(nS==1?'':'s'):'')+(nI?' · compra ajustada':''),4500);return false}
+
+/* ---------- Gastos del negocio ---------- */
+const GCATS=['Alquiler','Publicidad','Empaques y bolsas','Transporte','Servicios (luz, agua, internet)','Sueldos','Impuestos y trámites','Otros'];
+function gList(){return D.moves.filter(x=>x.type==='gasto'&&inRange(x)).sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:a.id<b.id?1:-1)}
+function vGas(){const l=gList(),tot=l.reduce((t,x)=>t+x.cost,0),by={};l.forEach(x=>{by[x.gcat]=(by[x.gcat]||0)+x.cost});
+ return `<h2>Gastos del negocio</h2>
+ <select onchange="range=this.value;render()" style="margin:0 0 10px">${monthOpts()}</select>
+ <button class="btn" onclick="gasForm('')" style="margin-bottom:12px">+ Registrar un gasto</button>
+ <div class="grid"><div class="card"><div class="mut">Total gastado</div><div class="big" style="color:var(--bad)">${money(tot)}</div></div>
+ <div class="card"><div class="mut">Registros</div><div class="big">${l.length}</div></div></div>`+
+ (Object.keys(by).length?`<div class="card"><b>Por categoría</b>${Object.entries(by).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="row" style="margin-top:6px"><span>${esc(k)}</span><b>${money(v)}</b></div>`).join('')}</div>`:'')+
+ (l.length?l.map(x=>`<div class="card" onclick="gasForm('${x.id}')"><div class="row"><div><b>${esc(x.name)}</b><div class="mut">${fd(x.date)} · ${esc(x.gcat||'Otros')}${x.method?' · '+esc(x.method):''}${x.note?' · '+esc(x.note):''}</div></div><b style="color:var(--bad)">${money(x.cost)}</b></div></div>`).join(''):'<div class="empty">No hay gastos en este período.</div>')+
+ `<p class="mut">Registra aquí alquiler, publicidad, bolsas, pasajes sueltos y otros gastos. El resumen los resta de tu ganancia para mostrarte la utilidad real. Toca un gasto para corregirlo o borrarlo.</p>`}
+function gasForm(id){const x=D.moves.find(m=>m.id===id&&m.type==='gasto')||{};
+ modal(`<h2>${id?'Editar gasto':'Registrar un gasto'}</h2><form onsubmit="return saveGas(event,'${id}')">
+ <label>¿En qué fue?<input name="n" required value="${esc(x.name||'')}" placeholder="Ej: Alquiler de octubre"></label>
+ <div class="r2"><label>Categoría<select name="g">${GCATS.map(c=>`<option ${c===x.gcat?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
+ <label>Monto (S/)<input name="a" type="number" step="0.01" min="0.01" required value="${x.cost!=null?Math.round(x.cost*100)/100:''}"></label></div>
+ <div class="r2"><label>Forma de pago<select name="m">${METHODS.map(m=>`<option ${m===x.method?'selected':''}>${m}</option>`).join('')}</select></label>
+ <label>Fecha<input name="d" type="date" min="2025-09-01" max="${today()}" value="${x.date||today()}" required></label></div>
+ <label>Nota (opcional)<input name="t" value="${esc(x.note||'')}"></label>
+ <button class="btn">Guardar</button>${id?`<button type="button" class="btn ghost" style="color:var(--bad)" onclick="delGas('${id}')">Eliminar gasto</button>`:''}
+ <button type="button" class="btn ghost" onclick="closeM()">Cancelar</button></form>`)}
+function saveGas(e,id){e.preventDefault();const f=new FormData(e.target),amt=Math.round(+f.get('a')*100)/100,dt=f.get('d');
+ if(!(amt>0))return false;if(dt<'2025-09-01'||dt>today()){toast('La fecha debe ser desde el 01/09/2025 hasta hoy');return false}
+ const o={date:dt,type:'gasto',pid:'',name:(f.get('n')||'').trim(),unit:'',qty:1,cost:amt,price:0,gcat:f.get('g'),method:f.get('m'),note:(f.get('t')||'').trim(),by:myName};
+ if(id){const x=D.moves.find(m=>m.id===id);if(x)Object.assign(x,o)}else D.moves.push(Object.assign({id:uid()},o));
+ save();closeM();render();toast('Gasto guardado: '+money(amt));return false}
+function delGas(id){if(!confirm('¿Eliminar este gasto?'))return;D.moves=D.moves.filter(m=>m.id!==id);save();closeM();render();toast('Gasto eliminado')}
+
+/* ---------- Inicio (lo de hoy) ---------- */
+function stats(pred){let sold=0,gain=0,loss=0,gas=0;
+ D.moves.filter(pred).forEach(x=>{if(x.type==='out'){sold+=x.qty*x.price;gain+=x.qty*(x.price-x.cost)}else if(x.type==='merma')loss+=x.qty*x.cost;else if(x.type==='ajuste'&&x.qty<0)loss+=-x.qty*x.cost;else if(x.type==='gasto')gas+=x.cost});
+ return{sold,gain,loss,gas,util:gain-loss-gas}}
+function vIni(){const t=today(),m=t.slice(0,7),sv=D.sales.filter(z=>z.date===t),mine=sv.filter(z=>z.by===myName),a=alerts(),g=debtGroups();
+ const sh=ADM()?sv:mine,tot=sh.reduce((q,z)=>q+saleTotal(z.id),0);
+ const fecha=new Date().toLocaleDateString('es-PE',{weekday:'long',day:'numeric',month:'long'});
+ let h=`<h2>Hola, ${esc(myName)} 👋</h2><div class="mut" style="margin:-8px 0 12px;text-transform:capitalize">${esc(fecha)}</div>
+ <div class="r2" style="margin-bottom:12px"><button class="btn" style="margin:0" onclick="go('vender')">+ Nueva venta</button>
+ ${ADM()?`<button class="btn ghost" style="margin:0" onclick="go('entrada')">+ Entrada</button><button class="btn ghost" style="margin:0" onclick="gasForm('')">+ Gasto</button>`:''}
+ <button class="btn ghost" style="margin:0" onclick="go('deudas')">Ver deudas</button></div>
+ <h3>Hoy</h3><div class="grid"><div class="card"><div class="mut">${ADM()?'Ventas de hoy':'Mis ventas de hoy'}</div><div class="big">${sh.length}</div><div class="mut">${money(tot)}</div></div>`;
+ if(ADM()){
+  const hy=stats(x=>x.date===t),pay={};sv.forEach(z=>{const k=z.method||'Sin dato';pay[k]=(pay[k]||0)+z.paid});D.payments.filter(x=>x.date===t).forEach(x=>{pay[x.method]=(pay[x.method]||0)+x.amount});
+  const cob=Object.values(pay).reduce((q,v)=>q+v,0);
+  h+=`<div class="card"><div class="mut">Ganancia de hoy</div><div class="big" style="color:var(--ok)">${money(hy.gain)}</div></div>
+  <div class="card"><div class="mut">Cobrado hoy</div><div class="big">${money(cob)}</div>${Object.entries(pay).filter(([k,v])=>v>0).map(([k,v])=>`<div class="mut">${esc(k)}: ${money(v)}</div>`).join('')}</div>
+  <div class="card"><div class="mut">Gastos de hoy</div><div class="big" style="color:var(--bad)">${money(hy.gas)}</div></div>`}
+ else h+=`<div class="card"><div class="mut">Por vencer (30 días)</div><div class="big" style="color:var(--warn)">${a.s.length}</div></div>`;
+ h+=`</div><h3>Para atender</h3>`;
+ const debT=g.reduce((q,x)=>q+x.debe,0);
+ h+=`<div class="card" onclick="go('deudas')"><div class="row"><div><b>Por cobrar</b><div class="mut">${g.length} cliente${g.length==1?'':'s'}</div></div><div class="big" style="color:var(--warn)">${money(debT)}</div></div></div>
+ <div class="card" onclick="go('alertas')"><div class="row"><div><b>Alertas</b><div class="mut">Stock bajo o agotado · por vencer</div></div><div class="big">${a.b.length} · ${a.s.length}</div></div></div>`;
+ if(ADM()){const ms=stats(x=>x.date.slice(0,7)===m);
+  h+=`<h3>Este mes</h3><div class="card"><div class="row"><span>Vendido</span><b>${money(ms.sold)}</b></div>
+  <div class="row"><span>Ganancia por ventas</span><b>${money(ms.gain)}</b></div>
+  <div class="row"><span>− Mermas y faltantes</span><b style="color:var(--bad)">${money(ms.loss)}</b></div>
+  <div class="row"><span>− Gastos</span><b style="color:var(--bad)">${money(ms.gas)}</b></div>
+  <div class="row" style="margin-top:6px;border-top:1px dashed var(--line);padding-top:8px"><b>Utilidad real</b><b style="color:${ms.util>=0?'var(--ok)':'var(--bad)'};font-size:20px">${money(ms.util)}</b></div>
+  ${estCount()?'<div class="mut" style="margin-top:6px">⚠ Parte del costo es estimado.</div>':''}</div>`}
+ return h}
+
+/* ---------- Escáner de código de barras ---------- */
+let sc={};
+const normBC=c=>{c=String(c==null?'':c).trim().replace(/\s+/g,'');if(/^\d{12}$/.test(c))c='0'+c;return c};
+const byCode=code=>D.products.filter(p=>(p.barcode&&normBC(p.barcode)===code)||p.code.toLowerCase()===code.toLowerCase());
+function addUnit(p){const l=cart.find(c=>c.pid===p.id&&!c.combo&&Math.abs(c.price-p.price)<0.001);if(l)l.qty++;else cart.push({pid:p.id,qty:1,price:p.price})}
+function loadScript(src){return new Promise((res,rej)=>{const t=document.createElement('script');t.src=src;t.onload=res;t.onerror=()=>rej(new Error('x'));document.head.appendChild(t)})}
+function scanMsg(t){const m=$('#scm');if(m)m.textContent=t}
+function scanOpen(mode,title,cb,keep){scanStop();sc={mode,cb,keep:!!keep,busy:false,last:'',lastT:0,stream:null,timer:null,h:null,code:''};
+ $('#sc').innerHTML=`<div class="sheet"><h2>${esc(title)}</h2>
+ <div id="scv" style="background:#000;border-radius:12px;overflow:hidden;min-height:200px"><video id="scVid" playsinline muted autoplay></video></div>
+ <p class="mut" id="scm" style="margin:8px 0">Apunta la cámara al código de barras…</p><div id="scr"></div>
+ <label>¿No lo lee? Escribe el número del código y toca Enter<input id="scman" inputmode="numeric" autocomplete="off" placeholder="Ej: 7501234567890" onkeydown="if(event.key==='Enter'){event.preventDefault();scanGot(this.value);this.value=''}"></label>
+ <button class="btn" onclick="scanClose()">${keep?'Listo':'Cerrar'}</button></div>`;
+ $('#sc').className='on';scanStart()}
+async function scanStart(){const vid=$('#scVid');let det=null;
+ if('BarcodeDetector' in window){try{const sup=await BarcodeDetector.getSupportedFormats(),f=['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'].filter(x=>sup.includes(x));if(f.length)det=new BarcodeDetector({formats:f})}catch(e){det=null}}
+ try{
+  if(det){
+   sc.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+   vid.srcObject=sc.stream;try{await vid.play()}catch(e){}
+   sc.timer=setInterval(async()=>{if(sc.busy||!sc.cb||vid.readyState<2)return;try{const r=await det.detect(vid);if(r&&r.length)scanGot(r[0].rawValue)}catch(e){}},250);
+  }else{
+   $('#scv').innerHTML='';await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js');
+   const F=Html5QrcodeSupportedFormats;sc.h=new Html5Qrcode('scv',{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF],verbose:false});
+   await sc.h.start({facingMode:'environment'},{fps:10,qrbox:{width:280,height:130}},t=>scanGot(t),()=>{});
+  }
+ }catch(e){scanMsg('No pude abrir la cámara. Revisa el permiso de la cámara en Chrome, o escribe el código aquí abajo.')}}
+function scanStop(){clearInterval(sc.timer);if(sc.stream){try{sc.stream.getTracks().forEach(t=>t.stop())}catch(e){}}
+ if(sc.h){const h=sc.h;sc.h=null;try{h.stop().then(()=>h.clear()).catch(()=>{})}catch(e){}}sc.stream=null;sc.timer=null}
+function scanClose(){scanStop();$('#sc').className='';sc.cb=null}
+function scanGot(raw){const code=normBC(raw);if(!code||!sc.cb||sc.busy)return;const n=Date.now();if(code===sc.last&&n-sc.lastT<2500)return;sc.last=code;sc.lastT=n;
+ try{navigator.vibrate&&navigator.vibrate(50)}catch(e){}
+ if(sc.mode==='raw'){const cb=sc.cb;scanClose();cb(code);return}
+ const ps=byCode(code);
+ if(ps.length===1){scanPick(ps[0]);return}
+ sc.busy=true;
+ if(ps.length>1){$('#scr').innerHTML=`<div class="card"><b>Código ${esc(code)}</b><div class="mut">Lo tienen varios productos. ¿Cuál es?</div>`+ps.map(p=>`<button class="btn ghost" onclick="scanChoose('${p.id}')">${esc(p.name)} · ${esc(p.code)}</button>`).join('')+`</div>`;return}
+ if(!ADM()){scanMsg('El código '+code+' no está registrado. Avísale a la dueña.');sc.busy=false;return}
+ sc.code=code;$('#scr').innerHTML=`<div class="card"><b>Código nuevo: ${esc(code)}</b><div class="mut">¿A qué producto pertenece?</div>
+ <input id="scs" placeholder="Buscar producto" oninput="scanFilter()" autocomplete="off" style="margin:8px 0"><div class="pickbox" id="scl">${scanList('')}</div>
+ <button class="btn ghost" onclick="scanSkip()">Omitir</button></div>`}
+function scanList(q){q=q.toLowerCase();const l=D.products.filter(p=>!p.kit&&(!q||p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q)));
+ return l.length?l.map(p=>`<div class="pk" onclick="scanAssign('${p.id}')"><div class="row"><b>${esc(p.name)}</b><span class="code">${esc(p.code)}</span></div>${p.barcode?`<div class="mut">Ya tiene el código ${esc(p.barcode)}</div>`:''}</div>`).join(''):'<div class="empty" style="padding:12px">No encontré ese producto.</div>'}
+function scanFilter(){$('#scl').innerHTML=scanList($('#scs').value)}
+function scanSkip(){$('#scr').innerHTML='';sc.busy=false;scanMsg('Apunta la cámara al código de barras…')}
+function scanChoose(id){$('#scr').innerHTML='';sc.busy=false;const p=P(id);if(p)scanPick(p)}
+function scanAssign(id){const p=P(id),code=sc.code;if(!p)return;
+ if(p.barcode&&normBC(p.barcode)!==code&&!confirm('"'+p.name+'" ya tiene el código '+p.barcode+'. ¿Cambiarlo por '+code+'?'))return;
+ p.barcode=code;save();$('#scr').innerHTML='';sc.busy=false;toast('Código enlazado a '+p.name);scanPick(p)}
+function scanPick(p){const r=sc.cb(p);if(sc.keep)scanMsg(r||('Listo: '+p.name));else scanClose()}
+function scanSale(){scanOpen('sale','Escanear para vender',p=>{
+ if(sellable(p)-cartQty(p.id)<1)return '⚠ No queda stock de '+p.name;
+ addUnit(p);if(tab==='vender')render();return '✓ Agregado: '+p.name+' (en esta venta: '+cartQty(p.id)+'). Escanea el siguiente.'},true)}
+function scanEntry(){scanOpen('entry','Escanear el producto que llegó',p=>{$('#ip').value=p.id;fillIn(p.id)},false)}
+function scanInv(){scanOpen('inv','Escanear un producto',p=>{invForm(p.id)},false)}
+function scanProd(){scanOpen('prod','Escanear un producto',p=>{pForm(p.id)},false)}
+function scanCode(){scanOpen('raw','Escanear el código de barras',code=>{$('#bcode').value=code},false)}
+function typedSale(v){const code=normBC(v);if(!/^[0-9A-Za-z-]{6,}$/.test(code))return;const ps=byCode(code);
+ if(ps.length===1){const p=ps[0];if(sellable(p)-cartQty(p.id)<1){toast('No queda stock de '+p.name);return}addUnit(p);vsq='';vsel='';render();toast('Agregado: '+p.name)}
+ else if(ps.length>1)toast('Varios productos tienen ese código: búscalos por nombre');
+ else if(/^\d{6,}$/.test(code))toast('Ese código no está registrado')}
+
 /* ---------- Mermas ---------- */
 function autoMerma(){let n=0;
  D.products.forEach(p=>{const dead=p.lots.filter(l=>l.qty>0&&l.exp&&l.exp<today());
@@ -833,8 +998,8 @@ function baja(pid,lid){const p=P(pid),l=p.lots.find(x=>x.id===lid);
 /* ---------- Resumen ---------- */
 function vSum(){
  const l=D.moves.filter(inRange);
- let sold=0,gain=0,buy=0,loss=0;
- l.forEach(x=>{if(x.type==='out'){sold+=x.qty*x.price;gain+=x.qty*(x.price-x.cost)}else if(x.type==='in')buy+=x.qty*x.cost;else if(x.type==='merma')loss+=x.qty*x.cost;else if(x.type==='ajuste'&&x.qty<0)loss+=-x.qty*x.cost});
+ let sold=0,gain=0,buy=0,loss=0,gas=0;
+ l.forEach(x=>{if(x.type==='out'){sold+=x.qty*x.price;gain+=x.qty*(x.price-x.cost)}else if(x.type==='in')buy+=x.qty*x.cost;else if(x.type==='merma')loss+=x.qty*x.cost;else if(x.type==='ajuste'&&x.qty<0)loss+=-x.qty*x.cost;else if(x.type==='gasto')gas+=x.cost});
  const pay={Efectivo:0,Yape:0,Transferencia:0};
  D.sales.filter(inRange).forEach(z=>{const k=z.method||'Sin dato';pay[k]=(pay[k]||0)+z.paid});
  D.payments.filter(a=>range==='todo'?a.date>='2025-09-01':a.date.slice(0,7)===range).forEach(a=>{pay[a.method]=(pay[a.method]||0)+a.amount});
@@ -844,7 +1009,7 @@ function vSum(){
  const cobT=D.sales.filter(z=>z.date>='2025-09-01').reduce((t,z)=>t+z.paid,0)+D.payments.filter(a=>a.date>='2025-09-01').reduce((t,a)=>t+a.amount,0);
  const bal=Math.round((cobT-cmp)*100)/100,pct=cmp>0?cobT/cmp*100:0;
  const inv=D.products.reduce((s,p)=>s+p.lots.reduce((a,x)=>a+x.qty*x.cost,0),0),val=D.products.reduce((s,p)=>s+stock(p)*p.price,0);
- const lab={in:'Entrada',out:'Venta',merma:'Merma',ajuste:'Ajuste de stock',armado:'Armado de combo'};
+ const lab={in:'Entrada',out:'Venta',merma:'Merma',ajuste:'Ajuste de stock',armado:'Armado de combo',gasto:'Gasto'};
  return `<h2>Resumen</h2>
  <select onchange="range=this.value;render()" style="margin:0 0 10px">${monthOpts()}</select>
  <div class="grid">
@@ -852,6 +1017,12 @@ function vSum(){
  <div class="card"><div class="mut">Ganancia</div><div class="big" style="color:var(--ok)">${money(gain)}</div></div>
  <div class="card"><div class="mut">Compras</div><div class="big">${money(buy)}</div></div>
  <div class="card"><div class="mut">Pérdida (mermas y faltantes)</div><div class="big" style="color:var(--bad)">${money(loss)}</div></div></div>
+ <div class="card"><b>Utilidad real del período</b><div class="mut">Lo que de verdad te queda</div>
+ <div class="row" style="margin-top:8px"><span>Ganancia por ventas</span><b>${money(gain)}</b></div>
+ <div class="row"><span>− Mermas y faltantes</span><b style="color:var(--bad)">${money(loss)}</b></div>
+ <div class="row"><span>− Gastos del negocio</span><b style="color:var(--bad)">${money(gas)}</b></div>
+ <div class="row" style="margin-top:6px;border-top:1px dashed var(--line);padding-top:8px"><b>= Utilidad real</b><b style="color:${gain-loss-gas>=0?'var(--ok)':'var(--bad)'};font-size:20px">${money(gain-loss-gas)}</b></div>
+ ${estCount()?'<div class="mut" style="margin-top:6px">⚠ Parte del costo de tus productos es estimado.</div>':''}</div>
  <div class="card"><div class="mut">Cobrado en este período</div><div class="big">${money(cobrado)}</div>${Object.entries(pay).filter(([k,v])=>k!=='Sin dato'||v>0).map(([k,v])=>`<div class="row mut"><span>${k}</span><b>${money(v)}</b></div>`).join('')}</div>
  <div class="card"><div class="mut">Por cobrar (fiados pendientes, a hoy)</div><div class="big" style="color:var(--warn)">${money(porCobrar)}</div></div>
  ${Object.keys(byV).length>1?`<div class="card"><b>Ventas por persona</b><div class="mut">Del período elegido</div>${Object.entries(byV).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="row" style="margin-top:6px"><span>${esc(k)}</span><b>${money(v)}</b></div>`).join('')}</div>`:''}
@@ -882,13 +1053,13 @@ function render(keepFocus){
  if(!ready)return;
  const nm=autoMerma();if(nm)toast(nm+(nm==1?' lote vencido pasó':' lotes vencidos pasaron')+' a Mermas');
  const a=alerts(),n=a.v.length+a.s.length,nd=debts().length;
- const ALL=[['productos','Productos'],['inventario','Inventario'],['precios','Precios'],['combos','Combos'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
+ const ALL=[['inicio','Inicio'],['productos','Productos'],['inventario','Inventario'],['precios','Precios'],['combos','Combos'],['vender','Vender'],['ventas','Ventas'],['entrada','Entrada'],['gastos','Gastos'],['deudas','Deudas'+(nd?' ('+nd+')':'')],['mermas','Mermas'],['alertas','Alertas'+(n?' ('+n+')':'')],['resumen','Resumen']];
  if(isOwner)ALL.push(['equipo','Equipo']);
- const OKV=['vender','ventas','deudas','productos','inventario','alertas'];
+ const OKV=['inicio','vender','ventas','deudas','productos','inventario','alertas'];
  const T=ADM()?ALL:OKV.map(k=>ALL.find(x=>x[0]===k));
  if(!T.some(x=>x[0]===tab))tab=T[0][0];
  $('#nav').innerHTML=T.map(([k,t])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${t}</button>`).join('');
- $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu,inventario:vInv,precios:vPre,combos:vCmb}[tab]();
+ $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu,inventario:vInv,precios:vPre,combos:vCmb,inicio:vIni,gastos:vGas}[tab]();
  if(keepFocus){const s=$('#s');if(s){s.focus();s.setSelectionRange(q.length,q.length)}}
 }
 window.addEventListener('fbready',boot);
