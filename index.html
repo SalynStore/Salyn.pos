@@ -1,21 +1,25 @@
 <!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Salyn POS</title>
+<title>Salyn Store</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#4a2545">
+<meta name="theme-color" content="#FFB6D5">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
-:root{--hh:52px;--bg:#fbf4f5;--card:#fff;--ink:#2e1a2b;--mut:#7d6a79;--pl:#4a2545;--rose:#c8456b;--ok:#2f7d5b;--warn:#b7791f;--bad:#c0392b;--line:#ecdde1}
+:root{--hh:52px;--bg:#FFF4F8;--card:#fff;--ink:#3D2E2E;--mut:#7A5F68;--pl:#8A3A5E;--rose:#D6336C;--ok:#2f7d5b;--warn:#b7791f;--bad:#c0392b;--line:#FFD6E7;--p1:#FFD6E7;--p2:#FFB6D5;--p3:#FF9BC4;--gold:#F9C46A}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:calc(var(--hh) + env(safe-area-inset-top)) 0 calc(24px + env(safe-area-inset-bottom))}
-header{position:fixed;top:0;left:0;right:0;z-index:4;height:calc(var(--hh) + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;display:flex;align-items:center;gap:8px;background:var(--pl);color:#fff}
-#nvb{background:none;border:0;color:#fff;font-size:24px;line-height:1;padding:4px 6px;margin-left:-6px}
+header{position:fixed;top:0;left:0;right:0;z-index:4;height:calc(var(--hh) + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,#FFD6E7,#FFB6D5);border-bottom:1px solid #FF9BC4;color:var(--pl)}
+header img{width:38px;height:38px;border-radius:50%;box-shadow:0 1px 4px rgba(138,58,94,.35);flex:none}
+#nvb{background:none;border:0;color:var(--pl);font-size:24px;line-height:1;padding:4px 6px;margin-left:-6px}
 body.nv{padding-left:62px}
 body.nv.nc{padding-left:0}
-header b{font:700 20px Georgia,serif}
+header b{font:400 22px 'Pacifico',Georgia,cursive;color:var(--rose);text-shadow:0 1px 0 #fff;white-space:nowrap}
 main{padding:14px;max-width:640px;margin:auto}
-h2{font:700 20px Georgia,serif;margin:4px 0 12px}
+h2{font:400 22px 'Pacifico',Georgia,cursive;color:var(--pl);margin:4px 0 12px}
 h3{font-size:15px;margin:18px 0 8px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
 .row{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
@@ -33,7 +37,7 @@ body.nc #nav{display:none!important}
 #nav button{position:relative;display:flex;flex-direction:column;align-items:center;gap:1px;width:100%;padding:6px 2px;border:0;background:none;font-family:inherit;color:var(--mut)}
 #nav .ni{font-size:19px;line-height:1.1}
 #nav .nt{font-size:9.5px;line-height:1.1}
-#nav button.on{color:var(--rose);font-weight:700;background:#fbeef2;box-shadow:inset 3px 0 0 var(--rose)}
+#nav button.on{color:var(--rose);font-weight:700;background:#FFE6F0;box-shadow:inset 3px 0 0 var(--rose)}
 #nav .nb{position:absolute;top:2px;right:6px;background:var(--rose);color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:0 5px;line-height:15px}
 #nav .ng{height:1px;background:var(--line);margin:3px 8px}
 #nav .ng span{display:none}
@@ -73,8 +77,9 @@ body.nc #nav{display:none!important}
 #sc{display:none;position:fixed;inset:0;background:rgba(20,10,20,.92);z-index:8;overflow:auto}
 #sc.on{display:block}
 #scv video{width:100%;display:block}
+.empty:not([style])::before{content:'';display:block;width:96px;height:96px;margin:0 auto 6px;background:url(mascota-maylo.png) center/contain no-repeat}
 </style></head><body>
-<header><button id="nvb" onclick="navToggle()" aria-label="Menú" style="display:none">☰</button><b>Salyn Store</b><span id="stt" onclick="retrySave()" style="margin-left:auto;font-size:12px;color:#e9c9d6;cursor:pointer;text-align:right"></span></header>
+<header><button id="nvb" onclick="navToggle()" aria-label="Menú" style="display:none">☰</button><img src="logo-sm.png" alt="Salyn Store"><b>Salyn Store</b><span id="stt" onclick="retrySave()" style="margin-left:auto;font-size:12px;color:var(--pl);cursor:pointer;text-align:right"></span></header>
 <main id="v"></main>
 <nav id="nav"></nav>
 <div id="m"></div><div id="sc"></div><div id="t"></div>
@@ -134,7 +139,7 @@ function softRender(){const a=document.activeElement;
 function updStatus(){const e=$('#stt');if(!ready){e.textContent='';return}
  e.textContent=syncErr?'⚠ No se guardó · toca para reintentar':(navigator.onLine?(pend>0?'⏳ Guardando…':'✓ Todo guardado'):'● Sin internet (se guarda y sube al volver)')+' · '+myName}
 function showLogin(msg){$('#nav').style.display='none';bodyCls('nv',0);$('#nvb').style.display='none';$('#stt').textContent='';
- $('#v').innerHTML=`<h2>Entrar</h2><div class="card"><form onsubmit="return doLogin(event)">
+ $('#v').innerHTML=`<div style="text-align:center;margin:4px 0"><img src="logo.png" alt="Salyn Store" style="width:170px;height:170px"></div><div class="mut" style="text-align:center;margin-bottom:12px">Kawaii · Love · Detalles que encantan</div><div class="card"><form onsubmit="return doLogin(event)">
  <label>Correo<input name="e" type="email" required autocomplete="username" value="${esc(localStorage.getItem('salyn_email')||'')}"></label>
  <label>Contraseña<input name="p" type="password" required autocomplete="current-password"></label>
  <button class="btn">Entrar</button></form><p class="mut" style="margin-top:12px"><a href="#" onclick="forgot();return false">Olvidé mi contraseña</a></p>${msg?`<p style="color:var(--bad)">${esc(msg)}</p>`:''}</div>`}
@@ -872,7 +877,8 @@ function stats(pred){let sold=0,gain=0,loss=0,gas=0;
 function vIni(){const t=today(),m=t.slice(0,7),sv=D.sales.filter(z=>z.date===t),mine=sv.filter(z=>z.by===myName),a=alerts(),g=debtGroups();
  const sh=ADM()?sv:mine,tot=sh.reduce((q,z)=>q+saleTotal(z.id),0);
  const fecha=new Date().toLocaleDateString('es-PE',{weekday:'long',day:'numeric',month:'long'});
- let h=`<h2>Hola, ${esc(myName)} 👋</h2><div class="mut" style="margin:-8px 0 12px;text-transform:capitalize">${esc(fecha)}</div>
+ const MASC=['mascota-motta.png','mascota-maylo.png','mascota-meteoro.png'][new Date().getDay()%3];
+ let h=`<div class="row" style="align-items:center;margin-bottom:8px"><div><h2 style="margin-bottom:2px">Hola, ${esc(myName)}</h2><div class="mut" style="text-transform:capitalize">${esc(fecha)}</div></div><img src="${MASC}" alt="" style="width:84px;height:auto"></div>
  <div class="r2" style="margin-bottom:12px"><button class="btn" style="margin:0" onclick="go('vender')">+ Nueva venta</button>
  ${ADM()?`<button class="btn ghost" style="margin:0" onclick="go('entrada')">+ Entrada</button><button class="btn ghost" style="margin:0" onclick="gasForm('')">+ Gasto</button>`:''}
  <button class="btn ghost" style="margin:0" onclick="go('deudas')">Ver deudas</button></div>
