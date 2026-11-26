@@ -27,7 +27,7 @@ h3{font-size:15px;margin:18px 0 8px}
 .pill{font-size:12px;padding:2px 8px;border-radius:99px;white-space:nowrap}
 .ok{background:#e3f3ec;color:var(--ok)}.pronto{background:#fbf0d9;color:var(--warn)}.vencido{background:#fbe3e0;color:var(--bad)}
 label{display:block;font-size:14px;color:var(--mut);margin-bottom:10px}
-input,select{display:block;width:100%;font:inherit;color:var(--ink);padding:10px;margin-top:4px;border:1px solid var(--line);border-radius:8px;background:#fff}
+input,select,textarea{display:block;width:100%;font:inherit;color:var(--ink);padding:10px;margin-top:4px;border:1px solid var(--line);border-radius:8px;background:#fff}
 .r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .btn{width:100%;font:600 16px inherit;font-family:inherit;padding:12px;border:0;border-radius:10px;background:var(--rose);color:#fff;margin-top:6px}
 .btn.ghost{background:#fff;color:var(--pl);border:1px solid var(--line)}
@@ -123,14 +123,14 @@ function save(){
  COLS.forEach(c=>{const seen={};
   D[c].forEach(x=>{const k=c+'/'+x.id,j=canon(x);seen[k]=1;if(synced[k]!==j){synced[k]=j;ops.push({col:c,id:x.id,data:JSON.parse(j)})}});
   Object.keys(synced).forEach(k=>{if(k.startsWith(c+'/')&&!seen[k]){delete synced[k];ops.push({col:c,id:k.slice(c.length+1),del:true})}})});
- const m=canon({cats:D.cats,reasons:D.reasons});
- if(synced['config/main']!==m){synced['config/main']=m;ops.push({col:'config',id:'main',data:{cats:D.cats,reasons:D.reasons}})}
+ const m=canon({cats:D.cats,reasons:D.reasons,wa:D.wa||'',aviso:D.aviso||'',catlive:!!D.catlive});
+ if(synced['config/main']!==m){synced['config/main']=m;ops.push({col:'config',id:'main',data:{cats:D.cats,reasons:D.reasons,wa:D.wa||'',aviso:D.aviso||'',catlive:!!D.catlive}})}
  if(ops.length){pend++;updStatus();FB.write(ops).then(()=>{pend--;syncErr='';updStatus()}).catch(e=>{pend--;syncErr=e.code||e.message||'error';ops.forEach(o=>{delete synced[o.col+'/'+o.id]});updStatus();toast('⚠ No se guardó en la nube: '+syncErr,6000)})}}
 function retrySave(){if(!ready)return;syncErr='';save();updStatus();toast('Reintentando guardar…')}
 function normalize(){COLS.forEach(c=>D[c].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0))}
 function onSnap(col,snap){let ch=false;
  snap.docChanges().forEach(c=>{const id=c.doc.id,k=col+'/'+id;
-  if(col==='config'){if(c.type!=='removed'){const d=c.doc.data();D.cats=d.cats||D.cats;D.reasons=d.reasons||D.reasons;synced[k]=canon({cats:D.cats,reasons:D.reasons});ch=true}return}
+  if(col==='config'){if(c.type!=='removed'){const d=c.doc.data();D.cats=d.cats||D.cats;D.reasons=d.reasons||D.reasons;D.wa=d.wa||'';D.aviso=d.aviso||'';D.catlive=!!d.catlive;synced[k]=canon({cats:D.cats,reasons:D.reasons,wa:D.wa||'',aviso:D.aviso||'',catlive:!!D.catlive});ch=true}return}
   if(c.type==='removed'){D[col]=D[col].filter(x=>x.id!==id);delete synced[k];ch=true}
   else{const d=c.doc.data();d.id=id;const i=D[col].findIndex(x=>x.id===id);if(i>=0)D[col][i]=d;else D[col].push(d);synced[k]=canon(d);ch=true}});
  if(ch){normalize();if(ready)softRender()}}
@@ -166,7 +166,7 @@ async function startSync(){
  if(isOwner)unsubs.push(FB.listen('team',snap=>{snap.docChanges().forEach(c=>{if(c.type==='removed')delete TEAM[c.doc.id];else TEAM[c.doc.id]=c.doc.data()});if(ready&&tab==='equipo')softRender()},()=>{}));
  await Promise.race([Promise.all(firsts),new Promise(r=>setTimeout(r,8000))]);
  normalize();
- if(!synced['config/main'])synced['config/main']=canon({cats:D.cats,reasons:D.reasons});
+ if(!synced['config/main'])synced['config/main']=canon({cats:D.cats,reasons:D.reasons,wa:D.wa||'',aviso:D.aviso||'',catlive:!!D.catlive});
  ready=true;$('#nav').style.display='block';$('#nvb').style.display='block';bodyCls('nv',1);try{bodyCls('nc',localStorage.getItem('salynNavCerrado')==='1')}catch(e){}updStatus();
  const loc=localStorage.getItem('salynpos');
  if(loc&&ADM()&&!D.products.length&&!D.moves.length){try{const d=JSON.parse(loc);if(d.products&&d.products.length)offerImport(d)}catch(e){}}
@@ -278,6 +278,14 @@ function pForm(id){const p=P(id)||{};
  <label>Fecha de vencimiento<input name="ex" type="date"></label>
  <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:15px"><input type="checkbox" name="est" style="width:auto;margin:0"> El costo es estimado (no tengo la boleta)</label>`}
  ${id&&p.lots.length?`<h3>Lotes (para corregir errores)</h3>`+p.lots.slice().sort(ord).map(x=>`<div class="lot"><span>${lotTxt(x,p)}</span><button type="button" class="btn sm ghost" onclick="delLot('${id}','${x.id}')">Quitar</button></div>`).join(''):''}
+ <h3>Catálogo en línea</h3>
+ <label style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:16px"><input type="checkbox" name="pub" ${p.pub?'checked':''} style="width:auto;margin:0"> Mostrar este producto en el catálogo</label>
+ <label>Descripción (la ve la clienta)<input name="desc" value="${esc(p.desc||'')}" placeholder="Ej: Reduce granitos durante la noche"></label>
+ <label>Marca (opcional)<input name="brand" value="${esc(p.brand||'')}"></label>
+ <label>Fotos: un link por línea (la primera es la principal)<textarea name="photos" rows="3" placeholder="https://...">${esc((p.photos||[]).join('\n'))}</textarea></label>
+ <div class="r2"><label>Grupo (si es un sabor o tono)<input name="grp" value="${esc(p.grp||'')}" placeholder="Ej: Mascarilla Bioaqua"></label>
+ <label>Opción<input name="opt" value="${esc(p.opt||'')}" placeholder="Ej: Fresa"></label></div>
+ <p class="mut">Si varios productos tienen el mismo "Grupo", el catálogo los junta en una sola tarjeta y la clienta elige la opción.</p>
  <button class="btn" style="margin-top:14px">Guardar</button>
  ${id?`<button type="button" class="btn ghost" onclick="delP('${id}')">Eliminar producto</button>`:''}
  <button type="button" class="btn ghost" onclick="closeM()">Cancelar</button></form>`);buyCalc()}
@@ -286,7 +294,8 @@ function savP(e,id){e.preventDefault();const f=new FormData(e.target),code=f.get
  if(f.get('c')==='__new'){toast('Elige una categoría');return false}
  const o={name:f.get('n').trim(),code,unit:f.get('u'),cat:f.get('c'),cost:+f.get('co'),price:+f.get('pr'),min:+f.get('mn')};
  const bp=f.get('bp')||'unidad',bn=Math.round(+f.get('bn'))||0,bc=+f.get('bc')||0,buyUse=bp!=='unidad'&&bn>0&&bc>0;
- o.barcode=normBC(f.get('bcode'))||null;const dup=o.barcode&&D.products.find(x=>x.id!==id&&normBC(x.barcode)===o.barcode);
+ o.barcode=normBC(f.get('bcode'))||null;
+ o.pub=f.get('pub')==='on';o.desc=(f.get('desc')||'').trim();o.brand=(f.get('brand')||'').trim();o.photos=(f.get('photos')||'').split('\n').map(x=>x.trim()).filter(Boolean);o.grp=(f.get('grp')||'').trim();o.opt=(f.get('opt')||'').trim();const dup=o.barcode&&D.products.find(x=>x.id!==id&&normBC(x.barcode)===o.barcode);
  o.buy=(bp!=='unidad'&&bn>0)?{pack:bp,per:bn}:null;o.cpack=buyUse?bc:null;if(buyUse)o.cost=Math.round(bc/bn*10000)/10000;
  if(id){const q0=P(id);if(q0.cost!==o.cost){delete q0.cbase;delete q0.emp}Object.assign(q0,o)}
  else{o.id=uid();o.lots=[];const n=Math.round((+f.get('st')||0)*(buyUse?bn:1)*10000)/10000;
@@ -965,6 +974,58 @@ function typedSale(v){const code=normBC(v);if(!/^[0-9A-Za-z-]{6,}$/.test(code))r
  else if(ps.length>1)toast('Varios productos tienen ese código: búscalos por nombre');
  else if(/^\d{6,}$/.test(code))toast('Ese código no está registrado')}
 
+const OLD_CAT=[{"name":"Parches contra granitos Dra. la Rosa","cat":"Skincare","brand":"Dra. la Rosa","price":6,"desc":"Reduce granitos y rojeces durante la noche.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/parches%20contra%20granitos%20Dra.%20la%20Rosa.jpeg","stock":"ok"},{"name":"Pañitos Capibara","cat":"Skincare","brand":"Salyn Store","price":1,"desc":"Limpian y refrescan el rostro. Diseño capibara.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Pa%C3%B1itos%20Cabibara.jpeg","stock":"ok"},{"name":"Pañitos Gatito","cat":"Skincare","brand":"Salyn Store","price":1,"desc":"Limpian y refrescan el rostro. Diseño gatito.","stock":"ok"},{"name":"Exfoliante durazno","cat":"Skincare","brand":"Salyn Store","price":18,"desc":"Exfolia suavemente. Aroma a durazno. Piel suave.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Exfoliante%20durazno.jpeg","stock":"ok"},{"name":"Exfoliante arroz Dra. la Rosa","cat":"Skincare","brand":"Dra. la Rosa","price":18,"desc":"Suaviza e ilumina. Fórmula con arroz coreano.","stock":"ok"},{"name":"Desmaquillante Bioaqua 300ml","cat":"Skincare","brand":"Bioaqua","price":20,"desc":"Retira el maquillaje suavemente. Rinde mucho.","stock":"agotado"},{"name":"Exfoliante de pies","cat":"Skincare","brand":"Salyn Store","price":18,"desc":"Elimina callosidades. Pies suaves desde la primera vez.","stock":"agotado"},{"name":"Exfoliante de cuerpo 250ml","cat":"Skincare","brand":"Salyn Store","price":18,"desc":"Exfolia e hidrata todo el cuerpo. 250ml.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Exfoliante%20de%20cuerpo%20250ml.jpeg","stock":"ok"},{"name":"Limpiador facial coreano","cat":"Skincare","brand":"Salyn Store","price":15,"desc":"Limpieza profunda con activos coreanos.","stock":"agotado"},{"name":"Parche de ojeras pote","cat":"Skincare","brand":"Salyn Store","price":18,"desc":"Reduce bolsas y ojeras. Efecto tensor e hidratante.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Parches%20para%20ojeras%20pote.jpeg","stock":"agotado"},{"name":"Pure Skin Cream acne Bioaqua","cat":"Skincare","brand":"Bioaqua","price":12,"desc":"Crema anti-acné. Controla el brillo y granitos.","stock":"ok"},{"name":"Limpiador mousse de arroz","cat":"Skincare","brand":"Salyn Store","price":18,"desc":"Mousse suave con extracto de arroz. Sin resecar.","stock":"agotado"},{"name":"Parches de labios","cat":"Skincare","brand":"Salyn Store","price":2,"desc":"Hidrata y rellena los labios. Efecto inmediato.","stock":"ok"},{"name":"Antifaz gel","cat":"Skincare","brand":"Salyn Store","price":6,"desc":"Antifaz de gel frío. Reduce hinchazón y cansancio.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Antifaz%20gel.jpeg","stock":"ok"},{"name":"Gloss Llavero","cat":"Maquillaje","brand":"Salyn Store","price":6,"desc":"Gloss brillante con llavero. Llévalo siempre contigo.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Gloss%20Llavero.jpeg","stock":"ok"},{"name":"Lip Oil brillos","cat":"Maquillaje","brand":"Salyn Store","price":6.5,"desc":"Hidrata y brilla a la vez. Varios colores.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Lip%20Oil%20brillos.jpeg","stock":"ok"},{"name":"Lip Gloss PH","cat":"Maquillaje","brand":"Salyn Store","price":6,"desc":"Cambia de color según tu pH. Único y personalizado.","stock":"ok"},{"name":"Lip Balm","cat":"Maquillaje","brand":"Salyn Store","price":6,"desc":"Hidratación profunda para los labios. Aroma dulce.","stock":"ok"},{"name":"Rubor osito","cat":"Maquillaje","brand":"Salyn Store","price":6,"desc":"Rubor con diseño de osito. Rosa natural y duradero.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Rubor%20osito.jpeg","stock":"ok"},{"name":"Lápiz de ojos","cat":"Maquillaje","brand":"Salyn Store","price":5.5,"desc":"Trazo preciso y duradero. Negro intenso.","stock":"ok"},{"name":"Rimel","cat":"Maquillaje","brand":"Salyn Store","price":7,"desc":"Alarga y define las pestañas. Sin grumos.","stock":"ok"},{"name":"Esponjas","cat":"Maquillaje","brand":"Salyn Store","price":2,"desc":"Para aplicar base y corrector. Acabado sin marcas.","stock":"ok"},{"name":"Tinta doble","cat":"Maquillaje","brand":"Salyn Store","price":6.5,"desc":"Doble punta para ojos y labios. Larga duración.","stock":"agotado"},{"name":"Gloss doble","cat":"Maquillaje","brand":"Salyn Store","price":6.5,"desc":"Dos tonos en uno. Acabado brillante irresistible.","stock":"agotado"},{"name":"Lip Oil Fruts","cat":"Maquillaje","brand":"Salyn Store","price":6,"desc":"Lip oil con aroma a frutas. Hidrata y da brillo.","stock":"ok"},{"name":"Gloss tipo Dior pack x2","cat":"Maquillaje","brand":"Salyn Store","price":13.5,"desc":"Pack de 2 glosses tipo Dior. Acabado lujoso.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Gloss%20tipo%20Dior%20pack%20x2.jpeg","stock":"ok"},{"name":"Paleta de sombras","cat":"Maquillaje","brand":"Salyn Store","price":25,"desc":"Tonos variados para cualquier look. Alta pigmentación.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Paleta%20de%20sombras.jpeg","stock":"ok"},{"name":"Delineador dupe","cat":"Maquillaje","brand":"Salyn Store","price":8.5,"desc":"Trazo fino y preciso. Negro intenso de larga duración.","stock":"agotado"},{"name":"Set borlas","cat":"Maquillaje","brand":"Salyn Store","price":7.5,"desc":"Set de borlas profesionales. Suaves para polvos.","stock":"ok"},{"name":"Mascarilla de velo Bioaqua","cat":"Mascarillas","brand":"Bioaqua","price":2.5,"desc":"Mascarilla de velo hidratante. Piel luminosa.","stock":"ok"},{"name":"Mascarilla facial Kiss Beauty","cat":"Mascarillas","brand":"Kiss Beauty","price":2.5,"desc":"Hidratación y suavidad en 5 minutos.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Mascarilla%20facial%20Kiss%20Beauty.jpeg","stock":"ok"},{"name":"Mascarilla Bioaqua Pure","cat":"Mascarillas","brand":"Bioaqua","price":5,"desc":"Limpieza profunda. Poros visiblemente reducidos.","stock":"ok"},{"name":"Mascarilla Dra. la Rosa","cat":"Mascarillas","brand":"Dra. la Rosa","price":3,"desc":"Con activos naturales. Piel suave y radiante.","stock":"ok"},{"name":"Crema de manos Bioaqua 30g","cat":"Cremas","brand":"Bioaqua","price":3,"desc":"Hidratación rápida. Perfecto para llevar en la cartera.","stock":"ok"},{"name":"Pestañas postizas","cat":"Pestañas","brand":"Salyn Store","price":4,"desc":"Look natural o dramático. Fáciles de aplicar.","stock":"ok"},{"name":"Perfume dupe Victoria Secret","cat":"Perfumes","brand":"Dupe VS","price":25,"desc":"Inspirado en VS. Floral y femenino. Duración todo el día.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Perfume%20dupe%20Victoria%20Secret.jpeg","stock":"ok"},{"name":"Lima de uñas pack x2","cat":"Uñas","brand":"Salyn Store","price":4,"desc":"Pack de 2 limas para dar forma perfecta a las uñas.","stock":"ok"},{"name":"Set de uñas acrílicas","cat":"Uñas","brand":"Salyn Store","price":8,"desc":"Set completo con diseños variados. Aplicación fácil.","stock":"ok"},{"name":"Uñas postizas","cat":"Uñas","brand":"Salyn Store","price":5.5,"desc":"Listas para aplicar. Variedad de formas y tamaños.","stock":"ok"},{"name":"Mini limas x2","cat":"Uñas","brand":"Salyn Store","price":1.5,"desc":"Pack de 2 mini limas. Perfectas para la cartera.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Mini%20limas%20x2.jpeg","stock":"ok"},{"name":"Lampara de uñas UV","cat":"Uñas","brand":"Salyn Store","price":10,"desc":"Seca el esmalte en segundos. Compacto y práctico.","stock":"ok"},{"name":"Mini plancha","cat":"Cabello","brand":"Salyn Store","price":13,"desc":"Plancha compacta para el cabello. Ideal para viajes.","stock":"agotado"},{"name":"Tratamiento de keratina","cat":"Cabello","brand":"Salyn Store","price":6.5,"desc":"Nutre y alisa el cabello. Resultados desde el primer uso.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Tratamiento%20de%20keratina.jpeg","stock":"agotado"},{"name":"Rulero","cat":"Cabello","brand":"Salyn Store","price":8,"desc":"Para rizar el cabello en casa. Fácil de usar.","stock":"ok"},{"name":"Espejo cuadrado","cat":"Accesorios","brand":"Salyn Store","price":6,"desc":"Espejo compacto cuadrado. Ideal para el bolso.","stock":"ok"},{"name":"Mini espejos","cat":"Accesorios","brand":"Salyn Store","price":3,"desc":"Espejo mini portátil. Para retoques al instante.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Mini%20espejos.jpeg","stock":"ok"},{"name":"Ventilador capibara","cat":"Accesorios","brand":"Capibara","price":7,"desc":"Mini ventilador con diseño capibara. Recargable.","img":"https://raw.githubusercontent.com/SalynStore/SalynStore/main/Ventilador%20capibara.jpeg","stock":"ok"},{"name":"Espejo LED 3 colores","cat":"Accesorios","brand":"Salyn Store","price":20,"desc":"Espejo con luz LED en 3 tonos. Perfecto para maquillarte.","stock":"ok"},{"name":"Peine de ceja/pestaña (x2)","cat":"Accesorios","brand":"Salyn Store","price":0.5,"desc":"Mini peine para definir cejas y pestañas. Liviano.","stock":"ok"},{"name":"Mini gancho","cat":"Accesorios","brand":"Salyn Store","price":1.5,"desc":"Ganchito pequeño para el cabello. Colores variados.","stock":"ok"},{"name":"Delineador","cat":"Maquillaje","brand":"Salyn Store","price":3.5,"desc":"Trazo fino y preciso. Negro intenso de larga duración.","stock":"ok"},{"name":"Gancho hawaiano","cat":"Accesorios","brand":"Salyn Store","price":2.5,"desc":"Gancho de cabello estilo hawaiano. Colores tropicales.","stock":"ok"},{"name":"Crema de manos durazno 2g","cat":"Cremas","brand":"Salyn Store","price":1,"desc":"Mini crema de manos con aroma a durazno. Para la cartera.","stock":"ok"},{"name":"Rimel Belle Spa","cat":"Maquillaje","brand":"Belle Spa","price":3.5,"desc":"Alarga y define las pestañas. Fórmula suave.","stock":"ok"},{"name":"Tiras de nariz","cat":"Skincare","brand":"Salyn Store","price":2,"desc":"Limpia poros de la nariz. Retira puntos negros.","stock":"ok"},{"name":"Set rizador","cat":"Cabello","brand":"Salyn Store","price":6.5,"desc":"Set para rizar el cabello. Rizos definidos y duraderos.","stock":"ok"},{"name":"Parche de ojeras","cat":"Skincare","brand":"Salyn Store","price":2,"desc":"Parches individuales para ojeras. Hidrata y refresca.","stock":"ok"},{"name":"Porta todo","cat":"Accesorios","brand":"Salyn Store","price":3.5,"desc":"Organizador compacto para llevar tus cosméticos.","stock":"ok"},{"name":"Toallas desmaquillantes Madison 25u","cat":"Skincare","brand":"Madison","price":4.0,"desc":"Pack de 25 toallas suaves desmaquillantes.","stock":"ok"},{"name":"Mascarilla Facial Madison","cat":"Mascarillas","brand":"Madison","price":5.0,"desc":"Mascarilla facial hidratante y suavizante.","stock":"ok"},{"name":"Blender conejito","cat":"Maquillaje","brand":"Salyn Store","price":1.5,"desc":"Esponja blender con diseño de conejito. Acabado suave.","stock":"ok"},{"name":"Carmines","cat":"Maquillaje","brand":"Salyn Store","price":1.0,"desc":"Labial carmín. Color intenso y duradero.","stock":"ok"},{"name":"Sombras Dikalu","cat":"Maquillaje","brand":"Dikalu","price":6.0,"desc":"Paleta de sombras Dikalu. Colores pigmentados.","stock":"ok"},{"name":"Parche de acne","cat":"Skincare","brand":"Salyn Store","price":7.5,"desc":"Parches para acné. Reduce granitos durante la noche.","stock":"ok"}];
+/* ---------- Catálogo en línea ---------- */
+const CATKEY={Skincare:'sk',Accesorios:'ac',Maquillaje:'mq',Mascarillas:'ma','Uñas':'un',Cremas:'cr',Cabello:'ca','Pestañas':'pe',Perfumes:'pf'};
+const CATICON={sk:'ti-sparkles',mq:'ti-palette',ma:'ti-leaf',cr:'ti-hand-stop',ac:'ti-star',un:'ti-star',ca:'ti-droplet',pe:'ti-eye',pf:'ti-wind',ot:'ti-sparkles'};
+const hash31=s=>{let h=5381;for(const c of String(s))h=((h<<5)+h+c.charCodeAt(0))>>>0;return h%2000000000+1};
+const normN=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+let lastPub='',pubTimer=null;
+function catalogData(){
+ const groups={},singles=[];
+ D.products.filter(p=>p.pub).forEach(p=>{const g=(p.grp||'').trim();
+  if(g){const k=g.toLowerCase();(groups[k]=groups[k]||{name:g,items:[]}).items.push(p)}else singles.push({name:p.name,items:[p],single:true})});
+ const prods=singles.concat(Object.values(groups)).map(g=>{
+  const it=g.items,first=it[0],tot=it.reduce((t,p)=>t+sellable(p),0),minSum=it.reduce((t,p)=>t+(p.min??3),0);
+  const photos=[];it.forEach(p=>(p.photos||[]).forEach(u=>{if(u&&!photos.includes(u))photos.push(u)}));
+  const key=CATKEY[first.cat]||'ot',stock=tot<=0?'agotado':tot<=minSum?'poco':'ok';
+  const o={id:hash31(g.single?first.id:'g:'+g.name.toLowerCase()),name:g.name,cat:first.cat,key,brand:first.brand||'Salyn Store',price:Math.round(Math.min(...it.map(p=>p.price))*100)/100,icon:CATICON[key],desc:first.desc||'',stock};
+  if(photos.length){o.img=photos[0];if(photos.length>1)o.imgs=photos.slice(1)}
+  if(!g.single){o.options=it.filter(p=>sellable(p)>0).map(p=>p.opt||p.name);o.optLabel='Opción'}
+  return o}).sort((a,b)=>a.cat.localeCompare(b.cat)||a.name.localeCompare(b.name));
+ return{wa:D.wa||'51977975478',aviso:D.aviso||'',products:prods}}
+function doPublish(manual){const d=catalogData(),sig=JSON.stringify(d);
+ if(!d.products.length){if(manual)toast('Marca al menos un producto con "Mostrar en el catálogo"');return}
+ if(!manual&&(!D.catlive||sig===lastPub))return;
+ lastPub=sig;
+ FB.write([{col:'catalog',id:'main',data:{json:sig,updated:Date.now()}}]).then(()=>{if(manual)toast('Catálogo publicado ✓ ('+d.products.length+' tarjetas)',4500)}).catch(e=>{lastPub='';toast('No se pudo publicar el catálogo: '+(e.code||''))});
+ if(manual&&!D.catlive){D.catlive=true;save()}}
+setInterval(()=>{if(ready&&D.catlive)doPublish(false)},10000);
+function vCatal(){const pubs=D.products.filter(p=>p.pub),d=catalogData();
+ return `<h2>Catálogo en línea</h2>
+ <div class="card"><div class="row"><div><b>${D.catlive?'Publicado y en vivo':'Todavía no publicado'}</b>
+ <div class="mut">${pubs.length} producto${pubs.length==1?'':'s'} marcado${pubs.length==1?'':'s'} · ${d.products.length} tarjeta${d.products.length==1?'':'s'} en el catálogo</div></div>
+ <span class="pill ${D.catlive?'ok':'pronto'}">${D.catlive?'En vivo':'Sin publicar'}</span></div>
+ <button class="btn" style="margin-top:10px" onclick="doPublish(true)">${D.catlive?'Publicar cambios ahora':'Publicar el catálogo'}</button>
+ <p class="mut" style="margin-bottom:0">${D.catlive?'Se actualiza solo cuando cambias un producto o se vende.':'Mientras no lo publiques, tu catálogo de siempre sigue funcionando igual.'}</p></div>
+ <div class="card"><b>Datos de la tienda</b>
+ <label style="margin-top:8px">WhatsApp para pedidos (con código de país)<input id="cwa" inputmode="numeric" value="${esc(D.wa||'51977975478')}"></label>
+ <label>Aviso arriba del catálogo (opcional)<input id="cav" value="${esc(D.aviso||'')}" placeholder="Ej: Envíos los lunes y jueves"></label>
+ <button class="btn ghost" onclick="catSave()">Guardar datos</button></div>
+ <div class="card"><b>Traer los datos del catálogo anterior</b><div class="mut" style="margin:4px 0 8px">Pasa las descripciones, fotos y marcas de tus ${OLD_CAT.length} productos a los productos de este panel, comparando por nombre. Los que no encuentra los crea sin stock ni costo.</div>
+ <button class="btn ghost" onclick="catImport()">Importar del catálogo anterior</button></div>
+ <h3>Qué productos se muestran</h3><div class="mut" style="margin:-4px 0 8px">Marca los que quieres publicar. Toca un producto para editar su descripción, sus fotos y su grupo.</div>`+
+ (D.products.length?D.products.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="card" style="padding:10px"><div class="row" style="align-items:center"><label style="display:flex;align-items:center;gap:10px;margin:0;color:var(--ink);flex:1"><input type="checkbox" ${p.pub?'checked':''} onchange="togPub('${p.id}',this.checked)" style="width:auto;margin:0"><span><b>${esc(p.name)}</b>${p.grp?' <span class="pill ok">'+esc(p.grp)+(p.opt?' · '+esc(p.opt):'')+'</span>':''}<br><span class="mut">${money(p.price)} · ${(p.photos||[]).length} foto${(p.photos||[]).length==1?'':'s'} · stock ${un(stock(p),p.unit)}</span></span></label><button class="btn sm ghost" onclick="pForm('${p.id}')">Editar</button></div></div>`).join(''):'<div class="empty">Aún no tienes productos.</div>')}
+function togPub(id,v){const p=P(id);if(!p)return;p.pub=!!v;save()}
+function catSave(){D.wa=($('#cwa').value||'').replace(/\D/g,'')||'51977975478';D.aviso=($('#cav').value||'').trim();save();toast('Datos guardados');if(D.catlive)doPublish(false)}
+function catImport(){if(!confirm('¿Importar '+OLD_CAT.length+' productos del catálogo anterior? Los que ya existen se completan; los demás se crean sin stock ni costo.'))return;
+ const idx={};D.products.forEach(p=>idx[normN(p.name)]=p);let upd=0,cre=0;
+ OLD_CAT.forEach(o=>{const k=normN(o.name);let p=idx[k];const photos=[o.img].concat(o.imgs||[]).filter(Boolean);
+  if(p){if(!p.desc&&o.desc)p.desc=o.desc;if(!p.brand&&o.brand)p.brand=o.brand;if(!(p.photos||[]).length&&photos.length)p.photos=photos;p.pub=true;upd++}
+  else{p={id:uid(),code:nextCode(),name:o.name,unit:'unidad',cat:o.cat,cost:0,price:+o.price||0,min:3,lots:[],buy:null,cpack:null,barcode:null,desc:o.desc||'',brand:o.brand||'',photos,pub:true};
+   if(!D.cats.includes(o.cat))D.cats.push(o.cat);D.products.push(p);idx[k]=p;cre++}});
+ save();render();toast('Importado: '+upd+' actualizados y '+cre+' nuevos (sin stock ni costo)',7000)}
+
 /* ---------- Mermas ---------- */
 function autoMerma(){let n=0;
  D.products.forEach(p=>{const dead=p.lots.filter(l=>l.qty>0&&l.exp&&l.exp<today());
@@ -1081,14 +1142,14 @@ function render(keepFocus){
  const NAVG=[['Día a día',[['inicio','Inicio','🏠'],['vender','Vender','🛒'],['ventas','Ventas','🧾'],['deudas','Deudas','💳']]],
   ['Inventario',[['productos','Productos','📦'],['inventario','Inventario','📋'],['entrada','Entrada','📥'],['mermas','Mermas','🗑️'],['combos','Combos','🎁'],['alertas','Alertas','🔔']]],
   ['Dinero',[['precios','Precios','🏷️'],['gastos','Gastos','💸'],['resumen','Resumen','📊']]],
-  ['Administración',[['equipo','Equipo','👥']]]];
+  ['Tienda en línea',[['catalogo','Catálogo','🛍️']]],['Administración',[['equipo','Equipo','👥']]]];
  const okv=['inicio','vender','ventas','deudas','productos','inventario','alertas'],allow=k=>k==='equipo'?isOwner:(ADM()||okv.includes(k));
  const flat=NAVG.flatMap(g=>g[1]).filter(x=>allow(x[0]));
  if(!flat.some(x=>x[0]===tab))tab=flat[0][0];
  $('#nav').innerHTML=NAVG.map(([gt,items])=>{const it=items.filter(x=>allow(x[0]));
   return it.length?`<div class="ng"><span>${gt}</span></div>`+it.map(([k,t,ic])=>{const bd=k==='deudas'?nd:k==='alertas'?n:0;
    return `<button class="${tab===k?'on':''}" onclick="go('${k}')"><span class="ni">${ic}</span><span class="nt">${t}</span>${bd?`<span class="nb">${bd}</span>`:''}</button>`}).join(''):''}).join('');
- $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,equipo:vEqu,inventario:vInv,precios:vPre,combos:vCmb,inicio:vIni,gastos:vGas}[tab]();
+ $('#v').innerHTML={productos:vProd,vender:vSell,entrada:vIn,ventas:vVen,deudas:vDeu,mermas:vMer,alertas:vAl,resumen:vSum,catalogo:vCatal,equipo:vEqu,inventario:vInv,precios:vPre,combos:vCmb,inicio:vIni,gastos:vGas}[tab]();
  if(keepFocus){const s=$('#s');if(s){s.focus();s.setSelectionRange(q.length,q.length)}}
 }
 window.addEventListener('fbready',boot);
